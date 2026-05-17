@@ -591,103 +591,155 @@ export async function gradeStudentPaper(
       ? `\n\nمعلومات حق الترك:\n${JSON.stringify(skipCandidates, null, 2)}`
       : '';
 
-    const prompt = `أنت محكّم دقيق لأوراق الامتحان. مهمتك: تصحيح ورقة الطالب من الصورة فقط.
+    // ═══════════════════════════════════════════════════════════
+    // المرحلة الأولى: القراءة العمياء — بدون إجابات نموذجية
+    // الهدف: النموذج لا يعرف الإجابة الصحيحة فلا يستطيع اختراعها
+    // ═══════════════════════════════════════════════════════════
+    const readingPrompt = `أنت قارئ ورقة امتحان فقط. مهمتك الوحيدة: اقرأ ما كتبه الطالب بخط يده في الصورة لكل سؤال.
 
-═══════════════════════════════════════
- المبدأ الأساسي: الدليل قبل الدرجة
-═══════════════════════════════════════
-الدرجة الافتراضية لكل سؤال = صفر.
-لا ترفع الدرجة إلا إذا رأيت دليلاً مرئياً واضحاً بخط الطالب في الصورة.
-إذا شككت → ابقَ على الصفر + needsReview=true.
-لا تمنح درجة بناءً على معرفتك بالإجابة الصحيحة.
+لا تعرف الإجابات الصحيحة. لا تحكم. لا تصحح. فقط انقل ما تراه.
 
-═══════════════════════════════════════
- خطوات العمل لكل سؤال — بالترتيب
-═══════════════════════════════════════
-الخطوة 1 — المسح البصري (قبل أي حكم):
-  حدد المنطقة في الصورة التي تخص هذا السؤال.
-  اكتب في rawVisual وصفاً حرفياً لما تراه بالضبط:
-  مثال: "أرى: ٣ × (-١٧) = -٤١ مكتوباً بالقلم الأحمر"
-  أو:   "لا أرى أي كتابة تحت هذا السؤال"
-  أو:   "أرى كتابة غير واضحة، يبدو أنها أرقام لكن لا أستطيع قراءتها"
+قواعد القراءة:
+▸ لكل سؤال: ابحث في الصورة عن الكتابة اليدوية المقابلة له.
+▸ انقل ما تراه حرفياً كما هو — أرقام، رموز، كلمات، معادلات — بالضبط.
+▸ إذا رأيت كتابة غير واضحة: اكتب ما تستطيع + [؟] للأجزاء الغامضة.
+▸ إذا لم تر أي كتابة لسؤال: اكتب "" فارغ تماماً.
+▸ لا تستنتج. لا تكمل. لا تصحح. لا تحسن. فقط انقل.
+▸ حافظ على الأرقام كما هي: ٤٨ تبقى ٤٨، -٤١ تبقى -٤١.
+▸ لا تنقل جواب سؤال لسؤال آخر.
 
-الخطوة 2 — نقل جواب الطالب:
-  studentAnswer = نقل حرفي لما وصفته في rawVisual فقط.
-  ▸ إذا rawVisual = "لا أرى كتابة" → studentAnswer = "" و status = "unanswered" و grade = 0. توقف هنا.
-  ▸ إذا rawVisual = "كتابة غير واضحة" → studentAnswer = ما تستطيع قراءته + [؟] للأجزاء الغامضة، needsReview = true.
-  ▸ لا تنقل كلمة واحدة من modelAnswer إلى studentAnswer.
-  ▸ إذا كتب الطالب إجابة خاطئة، انقلها خاطئة كما هي بالضبط.
+قواعد بنية الورقة:
+- السؤال الرئيسي: س1، س١، سؤال 1.
+- الفروع: أ، أ/، أ-، أ)، ب، ج، د.
+- النقاط: 1/، ١/، 1-، ١).
+- إذا لم يكن الجواب في موضعه ولا يوجد تسمية واضحة تربطه بالسؤال → اتركه فارغاً.
 
-الخطوة 3 — التحقق من المعادلات والأرقام (خاص بالمواد العلمية):
-  بعد نقل studentAnswer، تحقق:
-  ▸ هل الناتج الذي كتبه الطالب يتطابق رياضياً مع الناتج الصحيح؟
-  ▸ مثال: الطالب كتب ٣ × (-١٧) = -٤١ → الناتج الصحيح -٥١ → إذن الطالب أخطأ → grade يجب أن يعكس الخطأ.
-  ▸ لا تعتمد على شكل الخطوات، اعتمد على صحة الناتج النهائي الذي كتبه الطالب فعلاً.
-  ▸ إذا النتيجة النهائية خاطئة → grade = 0 أو درجة جزئية حسب الخطوات، ليس الدرجة الكاملة.
-  ▸ إذا النتيجة النهائية صحيحة لكن الخطوات ناقصة → درجة جزئية.
-
-الخطوة 4 — التقييم والدرجة:
-  قارن ما في studentAnswer بـ modelAnswer.
-  ▸ في الأسئلة النظرية: قيّم المعنى والمفهوم، لا التطابق الحرفي.
-  ▸ في الأسئلة الحسابية: الناتج النهائي الذي رأيته في الصورة هو الفيصل.
-  ▸ درجة جزئية إذا الفكرة صحيحة لكن يوجد خطأ في التطبيق.
-  ▸ feedback مختصر بالعربية يذكر سبب الدرجة وما الخطأ إن وجد.
-
-═══════════════════════════════════════
- قواعد صارمة — لا استثناء
-═══════════════════════════════════════
-✗ ممنوع: نقل أي نص من modelAnswer إلى studentAnswer.
-✗ ممنوع: إعطاء درجة كاملة لسؤال فيه ناتج خاطئ.
-✗ ممنوع: اختراع جواب لسؤال فارغ في الصورة.
-✗ ممنوع: نقل جواب سؤال لسؤال آخر.
-✓ مطلوب: rawVisual لكل سؤال قبل studentAnswer.
-✓ مطلوب: إذا confidence < 0.75 → needsReview = true تلقائياً.
-✓ مطلوب: حافظ على أرقام الطالب كما هي (٤٨ وليس 48).
-
-═══════════════════════════════════════
- قواعد بنية الورقة
-═══════════════════════════════════════
-- السؤال الرئيسي: س1، س١، س1/، س1:، سؤال 1.
-- الفروع: أ، أ/، أ-، أ)، (أ)، ب، ج، د.
-- النقاط: 1/، ١/، 1-، ١-، 1)، ١).
-- إذا كان الجواب بعيداً عن موضع السؤال ولا يوجد label واضح يربطه به → unanswered + needsReview.
-
-═══════════════════════════════════════
- قواعد حق الترك
-═══════════════════════════════════════
-- إذا كان السؤال يطلب عدداً محدداً من الفروع، صحح فقط ما أجاب عنه الطالب.
-- الفروع الزائدة الفارغة → status = "skipped"، feedback = "حق الترك".
-${skipInfo}
-
-═══════════════════════════════════════
- بيانات الامتحان
-═══════════════════════════════════════
-المادة: ${subject}
-عدد الأسئلة: ${flattenedQuestions.length}
-الدرجة الكلية: ${totalExamGrade}
-عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
-
-الأسئلة والأجوبة النموذجية:
+أسئلة الامتحان (بدون إجابات):
 ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   id: q.id,
   questionKey: q.questionKey || q.label,
   displayLabel: q.displayLabel || q.label,
   text: q.text,
-  modelAnswer: q.answer,
-  maxGrade: q.grade,
   type: q.type
 })), null, 2)}
 
-═══════════════════════════════════════
- تحقق ذاتي إجباري قبل إخراج JSON
-═══════════════════════════════════════
-لكل سؤال قبل إضافته للـ JSON اسأل نفسك:
-1) هل كتبت rawVisual أولاً؟
-2) هل studentAnswer مأخوذ من rawVisual فقط وليس من modelAnswer؟
-3) إذا كان الناتج الحسابي خاطئاً في الصورة، هل grade يعكس الخطأ؟
-4) إذا كان studentAnswer فارغاً، هل grade = 0؟
-5) إذا confidence < 0.75، هل needsReview = true؟
-إذا أي إجابة "لا" → أصلح قبل الإخراج.
+أرجع JSON فقط — لكل سؤال ما كتبه الطالب فقط:
+{
+  "readings": [
+    {
+      "questionId": "نفس id من القائمة",
+      "rawVisual": "وصف دقيق لما تراه في الصورة في موضع هذا السؤال",
+      "studentAnswer": "ما كتبه الطالب حرفياً، أو فارغ إذا لم يكتب",
+      "studentFinalResult": "آخر ناتج أو جواب كتبه الطالب، أو فارغ",
+      "confidence": 0.0,
+      "isEmpty": true
+    }
+  ]
+}`;
+
+    if (onProgress) onProgress(10, 100, 'grading');
+
+    const readingParts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+    readingParts.push({ text: readingPrompt });
+
+    const readingResponse = await generateWithGeminiFallback({
+      contents: { parts: readingParts },
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0,
+        systemInstruction: `أنت قارئ ورقة امتحان — وظيفتك الوحيدة هي نقل ما تراه بخط الطالب من الصورة.
+أنت لا تعرف الإجابات الصحيحة لأي سؤال ولا يُفترض أن تعرفها.
+لا تحكم على صحة أو خطأ أي جواب — هذا ليس دورك.
+إذا لم تر كتابة واضحة → studentAnswer فارغ وisEmpty=true.
+الكتابة الخاطئة تُنقل خاطئة. الكتابة الناقصة تُنقل ناقصة. لا تكمل ولا تصحح.`
+      }
+    });
+
+    const readingData = JSON.parse(cleanJson(readingResponse.text || '{}'));
+    const readings: any[] = readingData.readings || [];
+
+    // ═══════════════════════════════════════════════════════════
+    // طبقة التحقق الصارم — بين المرحلتين
+    // أي سؤال لا يجتاز هذا الفلتر يُصبح unanswered تلقائياً
+    // ═══════════════════════════════════════════════════════════
+    const validatedReadings = readings.map((r: any) => {
+      const answer = (r.studentAnswer || '').trim();
+      const visual = (r.rawVisual || '').trim();
+      const conf = typeof r.confidence === 'number' ? r.confidence : 0;
+
+      // الحالة 1: فارغ صريح
+      if (!answer || r.isEmpty === true) {
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: 0 };
+      }
+
+      // الحالة 2: النموذج نفسه قال إنه لا يرى شيئاً في rawVisual
+      const emptyVisualPatterns = /لا أرى|لا يوجد|فارغ|لم أجد|لا كتابة|blank|empty|not found|nothing/i;
+      if (emptyVisualPatterns.test(visual)) {
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: 0 };
+      }
+
+      // الحالة 3: confidence منخفض جداً — شك عالٍ
+      if (conf < 0.4) {
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: conf };
+      }
+
+      // الحالة 4: rawVisual فارغ أو غير موجود مع وجود إجابة — مشكوك فيه
+      if (!visual || visual.length < 3) {
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: 0 };
+      }
+
+      // اجتاز الفلتر — إجابة موثوقة
+      return r;
+    });
+
+    if (onProgress) onProgress(50, 100, 'grading');
+
+    // ═══════════════════════════════════════════════════════════
+    // المرحلة الثانية: التصحيح النصي — بدون صورة
+    // الهدف: مقارنة نص بنص فقط، بعيداً عن تأثير الصورة
+    // ═══════════════════════════════════════════════════════════
+
+    // بناء قائمة التصحيح من نتائج القراءة
+    const gradingInput = flattenedQuestions.map((q: any) => {
+      const reading = validatedReadings.find((r: any) => String(r.questionId) === String(q.id));
+      const isEmpty = !reading || reading.isEmpty === true || !(reading.studentAnswer || '').trim();
+      return {
+        id: q.id,
+        questionKey: q.questionKey || q.label,
+        displayLabel: q.displayLabel || q.label,
+        text: q.text,
+        modelAnswer: q.answer,
+        maxGrade: q.grade,
+        type: q.type,
+        studentAnswer: isEmpty ? '' : (reading?.studentAnswer ?? ''),
+        studentFinalResult: isEmpty ? '' : (reading?.studentFinalResult ?? ''),
+        rawVisual: reading?.rawVisual ?? '',
+        readingConfidence: reading?.confidence ?? 0,
+        isEmpty
+      };
+    });
+
+    const scoringPrompt = `أنت مصحح امتحانات خبير. لديك إجابات الطلاب جاهزة كنصوص — لا توجد صور.
+مهمتك فقط: قارن إجابة كل طالب بالإجابة النموذجية وأعط الدرجة المناسبة.
+
+قواعد التصحيح:
+▸ إذا كان studentAnswer فارغاً أو isEmpty=true → grade=0، status="unanswered"، لا تناقش.
+▸ إذا كان studentAnswer فيه ناتج خاطئ رياضياً → grade لا يكون كاملاً.
+▸ في الأسئلة النظرية: قيّم المعنى والمفهوم، لا التطابق الحرفي.
+▸ في الأسئلة الحسابية: الناتج النهائي في studentFinalResult هو الفيصل.
+▸ إذا readingConfidence < 0.7 → needsReview=true تلقائياً.
+▸ feedback مختصر بالعربية: سبب الدرجة وما الخطأ إن وجد.
+▸ لا تعدّل studentAnswer أبداً — انقله كما هو.
+
+${skipInfo}
+
+بيانات الامتحان:
+المادة: ${subject}
+الدرجة الكلية: ${totalExamGrade}
+عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
+
+إجابات الطالب مع الإجابات النموذجية:
+${JSON.stringify(gradingInput, null, 2)}
 
 أرجع JSON فقط:
 {
@@ -696,18 +748,18 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
       "studentName": "طالب غير معروف",
       "gradings": [
         {
-          "questionId": "نفس id من قائمة الأسئلة",
-          "questionKey": "نفس questionKey من قائمة الأسئلة",
-          "displayLabel": "نفس displayLabel من قائمة الأسئلة",
-          "rawVisual": "وصف حرفي لما تراه في الصورة لهذا السؤال تحديداً",
-          "studentAnswer": "نقل حرفي من rawVisual فقط — لا تصحح ولا تعدّل",
-          "studentAnswerNormalized": "نسخة موحدة للمقارنة فقط",
-          "studentFinalResult": "آخر ناتج كتبه الطالب كما هو في الصورة",
-          "studentFinalResultNormalized": "نسخة موحدة للمقارنة فقط",
+          "questionId": "نفس id",
+          "questionKey": "نفس questionKey",
+          "displayLabel": "نفس displayLabel",
+          "rawVisual": "من بيانات المدخلات — انقل كما هو",
+          "studentAnswer": "من بيانات المدخلات — لا تعدّل",
+          "studentAnswerNormalized": "نسخة موحدة للمقارنة",
+          "studentFinalResult": "من بيانات المدخلات — لا تعدّل",
+          "studentFinalResultNormalized": "نسخة موحدة",
           "grade": 0,
           "maxGrade": 0,
           "confidence": 0.0,
-          "feedback": "تقييم مختصر بالعربية: سبب الدرجة وما الخطأ إن وجد",
+          "feedback": "تقييم مختصر بالعربية",
           "status": "graded | unanswered | skipped",
           "needsReview": false,
           "isStudentAnswerCopiedFromModelRisk": false,
@@ -719,44 +771,20 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   ]
 }`;
 
-    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await generateWithGeminiFallback({
-      contents: { parts },
+    const scoringResponse = await generateWithGeminiFallback({
+      contents: { parts: [{ text: scoringPrompt }] },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: `أنت محكّم دقيق لأوراق الامتحان. عملك يقوم على مبدأ واحد: الدليل المرئي أولاً، الدرجة ثانياً.
-
-القاعدة الذهبية:
-الدرجة الافتراضية = صفر لكل سؤال.
-ارفع الدرجة فقط إذا رأيت دليلاً واضحاً بخط الطالب في الصورة يستحق الرفع.
-
-التمييز الأساسي بين المصدرين:
-▸ ورقة الطالب = الخط اليدوي الذي تراه في صورة الامتحان.
-▸ modelAnswer = النص المُرسَل في البرومبت — مرجع للمقارنة فقط، لا تنقل منه أي كلمة إلى studentAnswer.
-
-قواعد rawVisual — إجبارية:
-لكل سؤال اكتب rawVisual أولاً قبل أي حكم.
-rawVisual = وصف حرفي لما تراه في الصورة في موضع هذا السؤال.
-إذا لم تكتب rawVisual واضحاً → لا تكتب studentAnswer ولا grade.
-
-قواعد المعادلات الرياضية — حرجة:
-▸ لا تحكم بصحة معادلة بناءً على معرفتك — احكم على الناتج الذي كتبه الطالب فعلاً.
-▸ إذا كتب الطالب ناتجاً خاطئاً (مثل -٤١ بدل -٥١) → grade لا يكون كاملاً حتى لو الخطوات تبدو صحيحة.
-▸ إذا الناتج النهائي صحيح لكن الخطوات غير واضحة → درجة جزئية + needsReview.
-▸ إذا لم تتمكن من قراءة الناتج بوضوح → needsReview=true + confidence منخفضة.
-
-ممنوع مطلقاً:
-✗ نقل أي نص من modelAnswer إلى studentAnswer.
-✗ إعطاء درجة كاملة لناتج خاطئ في الصورة.
-✗ اختراع جواب لسؤال فارغ في الصورة.
-✗ رفع confidence فوق 0.7 إذا الكتابة غير واضحة.`
+        systemInstruction: `أنت مصحح امتحانات خبير. تعمل على نصوص فقط — لا صور.
+قاعدتك الأساسية: إذا studentAnswer فارغ أو isEmpty=true → grade=0 دون نقاش.
+لا تعدّل studentAnswer أبداً، انقله كما ورد في المدخلات.
+في الأسئلة الحسابية: تحقق رياضياً من صحة studentFinalResult مقارنةً بـ modelAnswer.
+إذا الناتج خاطئ → grade لا يكون كاملاً حتى لو الخطوات تبدو صحيحة.`
       }
     });
 
-    const data = JSON.parse(cleanJson(response.text || '{}'));
+    const data = JSON.parse(cleanJson(scoringResponse.text || '{}'));
 
     if (onProgress) onProgress(100, 100, 'grading');
 
@@ -767,6 +795,32 @@ rawVisual = وصف حرفي لما تراه في الصورة في موضع هذ
         const gradingsWithMax = (r.gradings || []).map((g: any) => {
           const sourceQuestion = flattenedQuestions.find(fq => fq.id === g.questionId);
           const maxGrade = Number(g.maxGrade ?? sourceQuestion?.grade ?? 0) || 0;
+
+          // ── الفلتر الصارم: إذا كانت إجابة الطالب فارغة من المرحلة الأولى، grade=0 لا نقاش ──
+          const originalReading = gradingInput.find((gi: any) => String(gi.id) === String(g.questionId));
+          const isConfirmedEmpty = originalReading?.isEmpty === true || !(originalReading?.studentAnswer || '').trim();
+          if (isConfirmedEmpty) {
+            return {
+              questionId: g.questionId || sourceQuestion?.id,
+              questionKey: g.questionKey || sourceQuestion?.questionKey || sourceQuestion?.label,
+              displayLabel: g.displayLabel || sourceQuestion?.displayLabel || sourceQuestion?.label,
+              rawVisual: originalReading?.rawVisual || '',
+              studentAnswer: '',
+              studentAnswerNormalized: '',
+              studentFinalResult: '',
+              studentFinalResultNormalized: '',
+              grade: 0,
+              maxGrade,
+              confidence: originalReading?.readingConfidence ?? 0,
+              feedback: 'لم يكتب الطالب إجابة لهذا السؤال.',
+              status: 'unanswered',
+              needsReview: false,
+              isStudentAnswerCopiedFromModelRisk: false,
+              box: [0, 0, 0, 0],
+              pageIndex: 0
+            };
+          }
+
           const grade = clampGrade(g.grade, maxGrade);
           const copiedRisk = Boolean(g.isStudentAnswerCopiedFromModelRisk || looksLikeCopiedModel(g.studentAnswer, sourceQuestion?.answer));
           const audit = buildMathAuditNote(g, sourceQuestion, maxGrade);
@@ -873,4 +927,3 @@ function fixInlineSubQuestions(q: any, parentId?: string, level: number = 1): an
   }
   return { ...q, id };
 }
-
