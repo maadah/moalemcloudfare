@@ -658,38 +658,37 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
     const readingData = JSON.parse(cleanJson(readingResponse.text || '{}'));
     const readings: any[] = readingData.readings || [];
 
+    // تشخيص مؤقت — احذفه بعد التأكد من عمل النظام
+    console.log('[READING PHASE] Raw readings from model:', JSON.stringify(readings, null, 2));
+
     // ═══════════════════════════════════════════════════════════
-    // طبقة التحقق الصارم — بين المرحلتين
-    // أي سؤال لا يجتاز هذا الفلتر يُصبح unanswered تلقائياً
+    // طبقة التحقق — بين المرحلتين
+    // نمسح فقط الحالات التي قال فيها النموذج صراحةً أنه لا يرى شيئاً
     // ═══════════════════════════════════════════════════════════
     const validatedReadings = readings.map((r: any) => {
       const answer = (r.studentAnswer || '').trim();
       const visual = (r.rawVisual || '').trim();
-      const conf = typeof r.confidence === 'number' ? r.confidence : 0;
 
-      // الحالة 1: فارغ صريح
+      // الحالة 1: فارغ صريح من النموذج
       if (!answer || r.isEmpty === true) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: 0 };
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
       }
 
-      // الحالة 2: النموذج نفسه قال إنه لا يرى شيئاً في rawVisual
-      const emptyVisualPatterns = /لا أرى|لا يوجد|فارغ|لم أجد|لا كتابة|blank|empty|not found|nothing/i;
-      if (emptyVisualPatterns.test(visual)) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: 0 };
+      // الحالة 2: النموذج قال صراحةً في rawVisual أنه لا يرى كتابة
+      // نستخدم كلمات محددة جداً لتجنب الحذف الخاطئ
+      const explicitEmptyVisual = /^(لا أرى|لا يوجد|فارغ|لم أجد|لا كتابة|لا توجد كتابة|الطالب لم يكتب|لا شيء)/.test(visual);
+      if (explicitEmptyVisual) {
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
       }
 
-      // الحالة 3: confidence منخفض جداً — شك عالٍ
-      if (conf < 0.4) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: conf };
-      }
-
-      // الحالة 4: rawVisual فارغ أو غير موجود مع وجود إجابة — مشكوك فيه
+      // الحالة 3: rawVisual غير موجود تماماً مع وجود إجابة — مشكوك فيه
+      // لكن إذا كان هناك إجابة بدون rawVisual، نبقيها مع تعليمها للمراجعة
       if (!visual || visual.length < 3) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true, confidence: 0 };
+        return { ...r, isEmpty: false, needsReview: true };
       }
 
       // اجتاز الفلتر — إجابة موثوقة
-      return r;
+      return { ...r, isEmpty: false };
     });
 
     if (onProgress) onProgress(50, 100, 'grading');
