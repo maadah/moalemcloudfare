@@ -9,3 +9,6 @@ coverage/
 !.env.example
 .wrangler
 .gitupload
+
+.dev.vars*
+!.dev.vars.example
