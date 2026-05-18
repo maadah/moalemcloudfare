@@ -592,47 +592,67 @@ export async function gradeStudentPaper(
       : '';
 
     // ═══════════════════════════════════════════════════════════
-    // المرحلة الأولى: القراءة العمياء — بدون إجابات نموذجية
-    // الهدف: النموذج لا يعرف الإجابة الصحيحة فلا يستطيع اختراعها
+    // تصنيف الأسئلة: حسابية مباشرة / مسائل نصية / نظرية
     // ═══════════════════════════════════════════════════════════
-    const readingPrompt = `أنت قارئ ورقة امتحان فقط. مهمتك الوحيدة: اقرأ ما كتبه الطالب بخط يده في الصورة لكل سؤال.
+    const mathQuestions = flattenedQuestions.filter((q: any) => 
+      guessQuestionMode(q, subject) === 'direct_math'
+    );
+    const otherQuestions = flattenedQuestions.filter((q: any) => 
+      guessQuestionMode(q, subject) !== 'direct_math'
+    );
 
-لا تعرف الإجابات الصحيحة. لا تحكم. لا تصحح. فقط انقل ما تراه.
+    // ═══════════════════════════════════════════════════════════
+    // المرحلة الأولى — أ: قراءة الناتج النهائي فقط للأسئلة الحسابية
+    // الهدف: تركيز النموذج على رقم واحد فقط → دقة أعلى
+    // ═══════════════════════════════════════════════════════════
+    const readingPrompt = `أنت قارئ ورقة امتحان. مهمتك الوحيدة: اقرأ ما كتبه الطالب من الصورة.
 
-قواعد القراءة:
-▸ لكل سؤال: ابحث في الصورة عن الكتابة اليدوية المقابلة له.
-▸ انقل ما تراه حرفياً كما هو — أرقام، رموز، كلمات، معادلات — بالضبط.
-▸ إذا رأيت كتابة غير واضحة: اكتب ما تستطيع + [؟] للأجزاء الغامضة.
-▸ إذا لم تر أي كتابة لسؤال: اكتب "" فارغ تماماً.
-▸ لا تستنتج. لا تكمل. لا تصحح. لا تحسن. فقط انقل.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ للأسئلة الحسابية المباشرة:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ابحث عن الناتج النهائي فقط الذي كتبه الطالب.
+الناتج النهائي = آخر رقم أو تعبير بعد علامة = في إجابة الطالب.
+▸ إذا كتب الطالب: ٣ × (-١٧) = -٥١  →  studentFinalResult = "-٥١"
+▸ إذا كتب الطالب: = ٢٠  →  studentFinalResult = "٢٠"
+▸ لا تقرأ الخطوات الوسطى، فقط الناتج الأخير.
+▸ إذا لم تجد ناتجاً نهائياً واضحاً: studentFinalResult = "" و isEmpty = true.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ للأسئلة النظرية والنصية:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+انقل ما كتبه الطالب كاملاً حرفياً.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ قواعد عامة صارمة:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ لا تحكم على صحة أو خطأ أي جواب.
+▸ لا تكمل. لا تصحح. لا تستنتج.
+▸ إذا لم تر كتابة لسؤال → studentAnswer="" و isEmpty=true.
 ▸ حافظ على الأرقام كما هي: ٤٨ تبقى ٤٨، -٤١ تبقى -٤١.
 ▸ لا تنقل جواب سؤال لسؤال آخر.
+▸ إذا لم يكن الجواب في موضعه ولا يوجد تسمية واضحة تربطه بالسؤال → isEmpty=true.
 
-قواعد بنية الورقة:
-- السؤال الرئيسي: س1، س١، سؤال 1.
-- الفروع: أ، أ/، أ-، أ)، ب، ج، د.
-- النقاط: 1/، ١/، 1-، ١).
-- إذا لم يكن الجواب في موضعه ولا يوجد تسمية واضحة تربطه بالسؤال → اتركه فارغاً.
-
-أسئلة الامتحان (بدون إجابات):
+أسئلة الامتحان:
 ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   id: q.id,
   questionKey: q.questionKey || q.label,
   displayLabel: q.displayLabel || q.label,
   text: q.text,
-  type: q.type
+  type: q.type,
+  mode: guessQuestionMode(q, subject)
 })), null, 2)}
 
-أرجع JSON فقط — لكل سؤال ما كتبه الطالب فقط:
+أرجع JSON فقط:
 {
   "readings": [
     {
       "questionId": "نفس id من القائمة",
+      "mode": "direct_math | word_problem | theory",
       "rawVisual": "وصف دقيق لما تراه في الصورة في موضع هذا السؤال",
-      "studentAnswer": "ما كتبه الطالب حرفياً، أو فارغ إذا لم يكتب",
-      "studentFinalResult": "آخر ناتج أو جواب كتبه الطالب، أو فارغ",
-      "confidence": 0.0,
-      "isEmpty": true
+      "studentAnswer": "ما كتبه الطالب حرفياً للأسئلة النظرية، أو الخطوات للحسابية",
+      "studentFinalResult": "الناتج النهائي فقط كما كتبه الطالب — أهم حقل للأسئلة الحسابية",
+      "confidence": 0.95,
+      "isEmpty": false
     }
   ]
 }`;
@@ -650,6 +670,7 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
         systemInstruction: `أنت قارئ ورقة امتحان — وظيفتك الوحيدة هي نقل ما تراه بخط الطالب من الصورة.
 أنت لا تعرف الإجابات الصحيحة لأي سؤال ولا يُفترض أن تعرفها.
 لا تحكم على صحة أو خطأ أي جواب — هذا ليس دورك.
+للأسئلة الحسابية: ركّز على الناتج النهائي (آخر رقم بعد =) وانقله بدقة تامة.
 إذا لم تر كتابة واضحة → studentAnswer فارغ وisEmpty=true.
 الكتابة الخاطئة تُنقل خاطئة. الكتابة الناقصة تُنقل ناقصة. لا تكمل ولا تصحح.`
       }
@@ -714,25 +735,52 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
         studentFinalResult: isEmpty ? '' : (reading?.studentFinalResult ?? ''),
         rawVisual: reading?.rawVisual ?? '',
         readingConfidence: reading?.confidence ?? 0,
+        mode: guessQuestionMode(q, subject),
         isEmpty
       };
     });
 
-    const scoringPrompt = `أنت مصحح امتحانات خبير. لديك إجابات الطلاب جاهزة كنصوص — لا توجد صور.
-مهمتك فقط: قارن إجابة كل طالب بالإجابة النموذجية وأعط الدرجة المناسبة.
+    const scoringPrompt = `أنت مصحح امتحانات خبير. لديك إجابات الطلاب كنصوص ومعها صور الورقة — استخدمها عند الحاجة فقط.
 
-قواعد التصحيح:
-▸ إذا كان studentAnswer فارغاً أو isEmpty=true → grade=0، status="unanswered"، لا تناقش.
-▸ إذا كان studentAnswer فيه ناتج خاطئ رياضياً → grade لا يكون كاملاً.
-▸ في الأسئلة النظرية: قيّم المعنى والمفهوم، لا التطابق الحرفي.
-▸ في الأسئلة الحسابية: الناتج النهائي في studentFinalResult هو الفيصل.
-▸ إذا readingConfidence < 0.7 → needsReview=true تلقائياً.
-▸ feedback مختصر بالعربية: سبب الدرجة وما الخطأ إن وجد.
-▸ لا تعدّل studentAnswer أبداً — انقله كما هو.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ منطق التصحيح — اتبعه بالترتيب
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+▌ إذا isEmpty=true أو studentAnswer فارغ:
+  → grade=0، status="unanswered"، توقف. لا تناقش.
+
+▌ للأسئلة الحسابية المباشرة (mode: direct_math):
+
+  الخطوة 1 — قارن studentFinalResult بالناتج الصحيح في modelAnswer:
+  
+  ✓ إذا تطابقا أو تعادلا رياضياً:
+    → grade = maxGrade كاملة
+    → feedback = "الناتج صحيح ✓"
+    → انتهى، لا حاجة لقراءة الخطوات
+
+  ✗ إذا اختلفا:
+    → افتح الصورة، انظر لخطوات الطالب في منطقة هذا السؤال
+    → قارن خطوة بخطوة مع modelAnswer
+    → إذا الخطأ في الحساب فقط (والطريقة صحيحة) → درجة جزئية (50-70% من maxGrade)
+    → إذا الطريقة خاطئة → grade = 0 أو درجة رمزية صغيرة
+    → feedback يذكر: الناتج الذي كتبه الطالب، الناتج الصحيح، وأين الخطأ
+
+▌ للأسئلة النظرية والنصية (mode: word_problem | theory):
+  → قيّم المعنى والمفهوم، لا التطابق الحرفي
+  → درجة جزئية إذا الفكرة صحيحة جزئياً
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ قواعد صارمة
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ لا تعطِ grade كاملة لناتج خاطئ مهما كانت الخطوات.
+▸ لا تعدّل studentAnswer أو studentFinalResult — انقلهما كما وردا.
+▸ readingConfidence < 0.7 → needsReview=true تلقائياً.
+▸ feedback مختصر وواضح بالعربية.
 ${skipInfo}
 
-بيانات الامتحان:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ بيانات الامتحان
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 المادة: ${subject}
 الدرجة الكلية: ${totalExamGrade}
 عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
@@ -752,12 +800,12 @@ ${JSON.stringify(gradingInput, null, 2)}
           "displayLabel": "نفس displayLabel",
           "rawVisual": "من بيانات المدخلات — انقل كما هو",
           "studentAnswer": "من بيانات المدخلات — لا تعدّل",
-          "studentAnswerNormalized": "نسخة موحدة للمقارنة",
+          "studentAnswerNormalized": "",
           "studentFinalResult": "من بيانات المدخلات — لا تعدّل",
-          "studentFinalResultNormalized": "نسخة موحدة",
+          "studentFinalResultNormalized": "",
           "grade": 0,
           "maxGrade": 0,
-          "confidence": 0.0,
+          "confidence": 0.95,
           "feedback": "تقييم مختصر بالعربية",
           "status": "graded | unanswered | skipped",
           "needsReview": false,
@@ -770,16 +818,23 @@ ${JSON.stringify(gradingInput, null, 2)}
   ]
 }`;
 
+    const scoringParts: any[] = [
+      // نرسل الصور أيضاً للمرحلة الثانية — تُستخدم فقط عند قراءة الخطوات للأسئلة الخاطئة
+      ...base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } })),
+      { text: scoringPrompt }
+    ];
+
     const scoringResponse = await generateWithGeminiFallback({
-      contents: { parts: [{ text: scoringPrompt }] },
+      contents: { parts: scoringParts },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: `أنت مصحح امتحانات خبير. تعمل على نصوص فقط — لا صور.
+        systemInstruction: `أنت مصحح امتحانات خبير.
 قاعدتك الأساسية: إذا studentAnswer فارغ أو isEmpty=true → grade=0 دون نقاش.
-لا تعدّل studentAnswer أبداً، انقله كما ورد في المدخلات.
-في الأسئلة الحسابية: تحقق رياضياً من صحة studentFinalResult مقارنةً بـ modelAnswer.
-إذا الناتج خاطئ → grade لا يكون كاملاً حتى لو الخطوات تبدو صحيحة.`
+للأسئلة الحسابية (direct_math):
+  - إذا studentFinalResult يساوي الناتج الصحيح → grade كاملة فوراً.
+  - إذا اختلف → افتح الصورة واقرأ الخطوات لتحديد نوع الخطأ ودرجة جزئية.
+لا تعدّل studentAnswer أو studentFinalResult أبداً — انقلهما كما وردا في المدخلات.`
       }
     });
 
