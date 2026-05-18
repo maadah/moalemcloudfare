@@ -602,44 +602,67 @@ export async function gradeStudentPaper(
     );
 
     // ═══════════════════════════════════════════════════════════
-    // المرحلة الأولى — أ: قراءة الناتج النهائي فقط للأسئلة الحسابية
-    // الهدف: تركيز النموذج على رقم واحد فقط → دقة أعلى
+    // المرحلة الأولى: القراءة بمساعدة قاموس التنسيق
+    // الإجابة النموذجية = مرجع للرموز والتنسيق فقط، ليس للنسخ
     // ═══════════════════════════════════════════════════════════
-    const readingPrompt = `أنت قارئ ورقة امتحان. مهمتك الوحيدة: اقرأ ما كتبه الطالب من الصورة.
+    const readingPrompt = `أنت قارئ ورقة امتحان متخصص. مهمتك الوحيدة: نقل ما كتبه الطالب بخط يده من الصورة.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- للأسئلة الحسابية المباشرة:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ابحث عن الناتج النهائي فقط الذي كتبه الطالب.
-الناتج النهائي = آخر رقم أو تعبير بعد علامة = في إجابة الطالب.
-▸ إذا كتب الطالب: ٣ × (-١٧) = -٥١  →  studentFinalResult = "-٥١"
-▸ إذا كتب الطالب: = ٢٠  →  studentFinalResult = "٢٠"
-▸ لا تقرأ الخطوات الوسطى، فقط الناتج الأخير.
-▸ إذا لم تجد ناتجاً نهائياً واضحاً: studentFinalResult = "" و isEmpty = true.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ كيف تستخدم الإجابة النموذجية — مهم جداً
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+الإجابة النموذجية هي "قاموس تنسيق" فقط — تُريك كيف تُكتب الرموز في هذا الامتحان.
+أمثلة على الاستخدام الصحيح:
+▸ إذا النموذجية فيها (ح) → فالطالب لو كتب شيئاً يشبه (4) بجانب معادلة، اعلم أنه ح وليس 4
+▸ إذا النموذجية فيها (ع) → فالطالب لو كتب شيئاً يشبه (ع أو 3) في سياق فيزياء، اعلم أنه ع
+▸ إذا النموذجية فيها (م²) → حافظ على نفس الرمز إذا رأيته في ورقة الطالب
+▸ إذا النموذجية فيها (ح/٣) → إذا رأيت كسراً مشابهاً، استخدم نفس الصيغة
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- للأسئلة النظرية والنصية:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-انقل ما كتبه الطالب كاملاً حرفياً.
+⚠️ ممنوع منعاً باتاً: نسخ قيمة أو رقم أو نتيجة من الإجابة النموذجية إلى studentAnswer.
+الإجابة النموذجية تُعلمك شكل الكتابة فقط — ليس المحتوى.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- قواعد عامة صارمة:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ لا تحكم على صحة أو خطأ أي جواب.
-▸ لا تكمل. لا تصحح. لا تستنتج.
-▸ إذا لم تر كتابة لسؤال → studentAnswer="" و isEmpty=true.
-▸ حافظ على الأرقام كما هي: ٤٨ تبقى ٤٨، -٤١ تبقى -٤١.
-▸ لا تنقل جواب سؤال لسؤال آخر.
-▸ إذا لم يكن الجواب في موضعه ولا يوجد تسمية واضحة تربطه بالسؤال → isEmpty=true.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ قاعدة السؤال الفارغ — الأهم على الإطلاق
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+إذا لم تر كتابة الطالب في موضع السؤال:
+  → studentAnswer = "" (فارغ تماماً)
+  → studentFinalResult = ""
+  → isEmpty = true
+  → rawVisual = "لا توجد كتابة في موضع هذا السؤال"
 
-أسئلة الامتحان:
+لا تضع أي نص في studentAnswer إذا لم تره بعينك في الصورة.
+لا تستنتج. لا تكمل. لا تفترض. إذا شككت → فارغ.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ كيف تقرأ إجابة الطالب
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+للأسئلة الحسابية المباشرة (mode: direct_math):
+  ▸ ابحث عن آخر ناتج كتبه الطالب بعد علامة =
+  ▸ انقله في studentFinalResult كما هو: -٤١ تبقى -٤١، ٢٠ تبقى ٢٠
+  ▸ لا تحسب. لا تتحقق. فقط انقل ما تراه.
+  ▸ إذا رأيت الخطوات أيضاً، انقلها في studentAnswer
+
+للأسئلة النظرية والنصية (mode: word_problem | theory):
+  ▸ انقل ما كتبه الطالب كاملاً حرفياً
+  ▸ استخدم قاموس التنسيق من الإجابة النموذجية للرموز غير الواضحة فقط
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ قواعد النقل الحرفي
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ الكتابة الخاطئة تُنقل خاطئة — هذا صحيح ومطلوب
+▸ الكتابة الناقصة تُنقل ناقصة
+▸ إذا جزء غير واضح: انقل ما تستطيع + [؟] للغامض
+▸ لا تنقل جواب سؤال إلى سؤال آخر
+▸ حافظ على الأرقام: ٤٨ تبقى ٤٨، -٤١ تبقى -٤١
+
+أسئلة الامتحان مع قاموس التنسيق:
 ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   id: q.id,
   questionKey: q.questionKey || q.label,
   displayLabel: q.displayLabel || q.label,
   text: q.text,
   type: q.type,
-  mode: guessQuestionMode(q, subject)
+  mode: guessQuestionMode(q, subject),
+  formatGuide: q.answer  // الإجابة النموذجية كمرجع تنسيق فقط
 })), null, 2)}
 
 أرجع JSON فقط:
@@ -648,9 +671,9 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
     {
       "questionId": "نفس id من القائمة",
       "mode": "direct_math | word_problem | theory",
-      "rawVisual": "وصف دقيق لما تراه في الصورة في موضع هذا السؤال",
-      "studentAnswer": "ما كتبه الطالب حرفياً للأسئلة النظرية، أو الخطوات للحسابية",
-      "studentFinalResult": "الناتج النهائي فقط كما كتبه الطالب — أهم حقل للأسئلة الحسابية",
+      "rawVisual": "وصف حرفي دقيق لما تراه في الصورة في موضع هذا السؤال، أو: لا توجد كتابة",
+      "studentAnswer": "ما كتبه الطالب حرفياً — فارغ تماماً إذا لم يكتب",
+      "studentFinalResult": "آخر ناتج كتبه الطالب كما هو — فارغ إذا لم يكتب",
       "confidence": 0.95,
       "isEmpty": false
     }
@@ -667,48 +690,67 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: `أنت قارئ ورقة امتحان — وظيفتك الوحيدة هي نقل ما تراه بخط الطالب من الصورة.
-أنت لا تعرف الإجابات الصحيحة لأي سؤال ولا يُفترض أن تعرفها.
-لا تحكم على صحة أو خطأ أي جواب — هذا ليس دورك.
-للأسئلة الحسابية: ركّز على الناتج النهائي (آخر رقم بعد =) وانقله بدقة تامة.
-إذا لم تر كتابة واضحة → studentAnswer فارغ وisEmpty=true.
-الكتابة الخاطئة تُنقل خاطئة. الكتابة الناقصة تُنقل ناقصة. لا تكمل ولا تصحح.`
+        systemInstruction: `أنت قارئ ورقة امتحان متخصص.
+مهمتك: نقل ما تراه بخط الطالب من الصورة فقط — لا تحكم، لا تصحح، لا تستنتج.
+
+القاعدة الأولى — السؤال الفارغ:
+إذا لم تر كتابة الطالب في موضع السؤال → studentAnswer="" و isEmpty=true بدون استثناء.
+لا تضع أي نص لم تره بعينك في الصورة، حتى لو كنت تعرف الجواب الصحيح.
+
+القاعدة الثانية — قاموس التنسيق:
+الإجابة النموذجية (formatGuide) تُريك فقط كيف تُكتب الرموز والوحدات في هذا الامتحان.
+استخدمها لتمييز الحروف العربية (ح، ع، م) من الأرقام المتشابهة بصرياً.
+ممنوع نسخ أي قيمة أو رقم أو نتيجة منها.
+
+القاعدة الثالثة — النقل الحرفي:
+الكتابة الخاطئة تُنقل خاطئة. -٤١ تبقى -٤١ حتى لو كانت -٥١ هي الصحيحة.`
       }
     });
 
     const readingData = JSON.parse(cleanJson(readingResponse.text || '{}'));
     const readings: any[] = readingData.readings || [];
 
-    // تشخيص مؤقت — احذفه بعد التأكد من عمل النظام
-    console.log('[READING PHASE] Raw readings from model:', JSON.stringify(readings, null, 2));
+    console.log('[READING PHASE]', JSON.stringify(readings, null, 2));
 
     // ═══════════════════════════════════════════════════════════
-    // طبقة التحقق — بين المرحلتين
-    // نمسح فقط الحالات التي قال فيها النموذج صراحةً أنه لا يرى شيئاً
+    // طبقة التحقق الصارم — صفر تسامح مع السؤال الفارغ
     // ═══════════════════════════════════════════════════════════
     const validatedReadings = readings.map((r: any) => {
       const answer = (r.studentAnswer || '').trim();
+      const finalResult = (r.studentFinalResult || '').trim();
       const visual = (r.rawVisual || '').trim();
 
-      // الحالة 1: فارغ صريح من النموذج
-      if (!answer || r.isEmpty === true) {
+      // ── الحالة 1: فارغ صريح من النموذج ──
+      if (!answer && !finalResult) {
+        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
+      }
+      if (r.isEmpty === true) {
         return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
       }
 
-      // الحالة 2: النموذج قال صراحةً في rawVisual أنه لا يرى كتابة
-      // نستخدم كلمات محددة جداً لتجنب الحذف الخاطئ
-      const explicitEmptyVisual = /^(لا أرى|لا يوجد|فارغ|لم أجد|لا كتابة|لا توجد كتابة|الطالب لم يكتب|لا شيء)/.test(visual);
-      if (explicitEmptyVisual) {
+      // ── الحالة 2: rawVisual يشير صراحةً لعدم وجود كتابة ──
+      const explicitEmpty = /^(لا توجد|لا أرى|لا يوجد|فارغ|لم أجد|لا كتابة|الطالب لم يكتب|لا شيء|nothing|empty|blank)/i.test(visual);
+      if (explicitEmpty) {
         return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
       }
 
-      // الحالة 3: rawVisual غير موجود تماماً مع وجود إجابة — مشكوك فيه
-      // لكن إذا كان هناك إجابة بدون rawVisual، نبقيها مع تعليمها للمراجعة
-      if (!visual || visual.length < 3) {
+      // ── الحالة 3: rawVisual غير موجود مع وجود إجابة → مشكوك فيه ──
+      if (!visual || visual.length < 5) {
         return { ...r, isEmpty: false, needsReview: true };
       }
 
-      // اجتاز الفلتر — إجابة موثوقة
+      // ── الحالة 4: فحص التطبيع — هل studentFinalResult مطابق للإجابة النموذجية؟ ──
+      // إذا نعم بنسبة عالية → نعلّمه للمراجعة (النموذج ربما نسخ بدل القراءة)
+      const sourceQ = flattenedQuestions.find((q: any) => String(q.id) === String(r.questionId));
+      if (sourceQ && finalResult && sourceQ.answer) {
+        const normResult = normalizeMathText(finalResult);
+        const normModel = normalizeMathText(sourceQ.answer);
+        const isSuspiciouslySimilar = normResult.length > 1 && normModel.includes(normResult) && normResult === normModel;
+        if (isSuspiciouslySimilar) {
+          return { ...r, isEmpty: false, needsReview: true, suspectedNormalization: true };
+        }
+      }
+
       return { ...r, isEmpty: false };
     });
 
@@ -877,10 +919,14 @@ ${JSON.stringify(gradingInput, null, 2)}
 
           const grade = clampGrade(g.grade, maxGrade);
           const copiedRisk = Boolean(g.isStudentAnswerCopiedFromModelRisk || looksLikeCopiedModel(g.studentAnswer, sourceQuestion?.answer));
+          const normalizationRisk = Boolean(originalReading?.suspectedNormalization);
           const audit = buildMathAuditNote(g, sourceQuestion, maxGrade);
-          const feedback = [g.feedback || '', copiedRisk ? 'تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب ويحتاج مراجعة.' : '', audit.note]
-            .filter(Boolean)
-            .join(' ');
+          const feedback = [
+            g.feedback || '',
+            copiedRisk ? 'تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب ويحتاج مراجعة.' : '',
+            normalizationRisk ? 'تنبيه آلي: الناتج مطابق للإجابة النموذجية تماماً — تحقق يدوياً من الورقة.' : '',
+            audit.note
+          ].filter(Boolean).join(' ');
 
           return {
             ...g,
@@ -896,7 +942,7 @@ ${JSON.stringify(gradingInput, null, 2)}
             isStudentAnswerCopiedFromModelRisk: copiedRisk,
             // إذا rawVisual يشير لعدم رؤية كتابة، تأكد grade = 0
             ...(g.rawVisual && /لا أرى|لا يوجد|فارغ|blank|empty/i.test(g.rawVisual) ? { grade: 0, status: 'unanswered' } : {}),
-            needsReview: Boolean(g.needsReview || copiedRisk || audit.needsReview || (typeof g.confidence === 'number' && g.confidence < 0.75)),
+            needsReview: Boolean(g.needsReview || copiedRisk || normalizationRisk || audit.needsReview || (typeof g.confidence === 'number' && g.confidence < 0.75)),
             feedback
           };
         });
