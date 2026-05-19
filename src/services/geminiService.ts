@@ -671,22 +671,12 @@ export async function gradeStudentPaper(
       : '';
 
     // ═══════════════════════════════════════════════════════════
-    // تصنيف الأسئلة: حسابية مباشرة vs نصية/نظرية
+    // التصحيح — طلب واحد لجميع الأسئلة
     // ═══════════════════════════════════════════════════════════
-    const mathQs = flattenedQuestions.filter((q: any) => guessQuestionMode(q, subject) === 'direct_math');
-    const otherQs = flattenedQuestions.filter((q: any) => guessQuestionMode(q, subject) !== 'direct_math');
+    const prompt = `أنت معلم خبير يصحح ورقة امتحان من الصورة.
 
-    const allGradingsRaw: any[] = [];
-
-    // ═══════════════════════════════════════════════════════════
-    // المسار الأول: الأسئلة النصية والنظرية — طلب واحد مباشر
-    // النموذج يرى الصورة كاملة ويفهم السياق والمعطيات
-    // ═══════════════════════════════════════════════════════════
-    if (otherQs.length > 0) {
-      const otherPrompt = `أنت معلم خبير يقيّم ورقة طالب من الصورة.
-
-صحح هذه الأسئلة فقط (النصية والنظرية):
-${JSON.stringify(otherQs.map((q: any) => ({
+المطلوب: صحح جميع هذه الأسئلة من الصورة:
+${JSON.stringify(flattenedQuestions.map((q: any) => ({
   id: q.id,
   questionKey: q.questionKey || q.label,
   displayLabel: q.displayLabel || q.label,
@@ -697,158 +687,106 @@ ${JSON.stringify(otherQs.map((q: any) => ({
 })), null, 2)}
 
 المادة: ${subject}
+الدرجة الكلية: ${totalExamGrade}
+عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
 ${skipInfo}
 
-قواعد التصحيح:
-- الصورة هي المصدر الوحيد لجواب الطالب.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+قواعد قراءة جواب الطالب
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- الصورة هي المصدر الوحيد. لا تخترع. لا تكمل.
 - إذا لم تر كتابة واضحة للسؤال → studentAnswer="" و status="unanswered" و grade=0.
-- لا تنسخ الإجابة النموذجية في studentAnswer.
-- قيّم المعنى والمفهوم، لا التطابق الحرفي.
-- إذا استخدم الطالب معطيات خاطئة من نص السؤال، اذكر ذلك في feedback.
-- الفكرة الصحيحة جزئياً → درجة جزئية.
-- feedback مختصر وواضح بالعربية.
-- عند الشك لا تخمّن → unanswered.
+- لا تنسخ الإجابة النموذجية في studentAnswer أبداً.
+- لا تنقل جواب سؤال لسؤال آخر.
+- عند الشك → unanswered، لا تخمّن.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+قاعدة الناتج النهائي — مهمة جداً
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ انقل الناتج كما كتبه الطالب في الصورة — حتى لو كان خاطئاً.
+لا تصحح الأرقام. إذا كتب -٤١ → اكتب -٤١ (لا -٥١).
+الناتج النهائي = آخر رقم بعد آخر = في المعادلة.
+الكتابة العربية من اليمين لليسار → الناتج في أقصى اليسار أو السطر الأخير.
+اتبع سلسلة = حتى آخرها — لا تأخذ أول رقم تراه.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+قواعد التصحيح
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+للأسئلة الحسابية المباشرة:
+- الناتج الذي كتبه الطالب صحيح رياضياً → grade كاملة.
+- الناتج خاطئ → grade = 0 أو جزئية إذا الطريقة صحيحة.
+
+للأسئلة النصية والمسائل:
+- افهم المعطيات والمطلوب من نص السؤال.
+- قيّم هل الطالب استخدم المعطيات الصحيحة وهل طريقته صحيحة.
+- قيّم المعنى والفهم، لا التطابق الحرفي.
+- الفكرة صحيحة جزئياً → درجة جزئية.
+
+للأسئلة النظرية:
+- قيّم المفهوم والمعنى.
+
+feedback مختصر وواضح بالعربية — سبب الدرجة فقط.
 
 أرجع JSON فقط:
 {
-  "gradings": [
+  "results": [
     {
-      "questionId": "نفس id",
-      "questionKey": "نفس questionKey",
-      "displayLabel": "نفس displayLabel",
-      "studentAnswer": "ما كتبه الطالب فقط",
-      "studentAnswerNormalized": "",
-      "studentFinalResult": "",
-      "studentFinalResultNormalized": "",
-      "grade": 0,
-      "maxGrade": 0,
-      "confidence": 0.95,
-      "feedback": "تقييم مختصر بالعربية",
-      "status": "graded | unanswered | skipped",
-      "needsReview": false,
-      "isStudentAnswerCopiedFromModelRisk": false,
-      "box": [0, 0, 0, 0],
-      "pageIndex": 0
+      "studentName": "طالب غير معروف",
+      "gradings": [
+        {
+          "questionId": "نفس id",
+          "questionKey": "نفس questionKey",
+          "displayLabel": "نفس displayLabel",
+          "studentAnswer": "ما كتبه الطالب فقط — فارغ إذا لم يكتب",
+          "studentAnswerNormalized": "",
+          "studentFinalResult": "الناتج كما كتبه الطالب — فارغ إذا لم يكتب",
+          "studentFinalResultNormalized": "",
+          "grade": 0,
+          "maxGrade": 0,
+          "confidence": 0.95,
+          "feedback": "تقييم مختصر",
+          "status": "graded | unanswered | skipped",
+          "needsReview": false,
+          "isStudentAnswerCopiedFromModelRisk": false,
+          "box": [0, 0, 0, 0],
+          "pageIndex": 0
+        }
+      ]
     }
   ]
 }`;
 
-      try {
-        const otherParts: any[] = [
-          ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
-          { text: otherPrompt }
-        ];
-        const otherResponse = await generateWithGeminiFallback({
-          contents: { parts: otherParts },
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0,
-            systemInstruction: `أنت معلم خبير في تصحيح الأسئلة النصية والنظرية.
-اقرأ الورقة من الصورة مباشرة. قيّم المعنى والفهم، لا التطابق الحرفي.
-إذا لم تر كتابة واضحة للسؤال → studentAnswer="" و grade=0.
-لا تخترع إجابات. لا تنسخ من الإجابة النموذجية.`
-          }
-        });
-        const otherData = JSON.parse(cleanJson(otherResponse.text || '{}'));
-        allGradingsRaw.push(...(otherData.gradings || []));
-      } catch {
-        otherQs.forEach((q: any) => allGradingsRaw.push({
-          questionId: q.id, questionKey: q.questionKey || q.label,
-          displayLabel: q.displayLabel || q.label, studentAnswer: '',
-          studentFinalResult: '', grade: 0, maxGrade: q.grade,
-          confidence: 0, feedback: 'فشل التصحيح.', status: 'unanswered', needsReview: true
-        }));
+    const parts: any[] = [
+      ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
+      { text: prompt }
+    ];
+
+    const response = await generateWithGeminiFallback({
+      contents: { parts },
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0,
+        systemInstruction: `أنت معلم خبير في تصحيح أوراق الامتحان لجميع المواد.
+صحح الورقة من الصورة مباشرة.
+
+القاعدة الأولى — السؤال الفارغ:
+إذا لم تر كتابة الطالب للسؤال → studentAnswer="" و grade=0 و status="unanswered".
+لا تضع جواباً لأنك تعرف الحل. فقط ما تراه في الصورة.
+
+القاعدة الثانية — الناتج النهائي:
+انقل الناتج كما كتبه الطالب حتى لو كان خاطئاً. لا تصحح الأرقام.
+الناتج في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
+
+القاعدة الثالثة — النصية والمسائل:
+افهم السياق والمعطيات. قيّم الطريقة والفهم، لا التطابق الحرفي.
+
+القاعدة الرابعة — النقل الحرفي:
+لا تنسخ من الإجابة النموذجية. لا تنقل جواب سؤال لآخر. عند الشك → unanswered.`
       }
-    }
+    });
 
-    if (onProgress) onProgress(40, 100, 'grading');
-
-    // ═══════════════════════════════════════════════════════════
-    // المسار الثاني: الأسئلة الحسابية — طلب منفصل لكل سؤال
-    // التركيز على سؤال واحد → دقة أعلى في قراءة الأرقام
-    // ═══════════════════════════════════════════════════════════
-    const makeMathPrompt = (q: any, skipInfoText: string) => `ركّز على هذا السؤال الحسابي الواحد فقط في الصورة.
-
-السؤال: ${q.displayLabel || q.label}
-النص: ${q.text}
-الإجابة النموذجية: ${q.answer}
-الدرجة القصوى: ${q.grade}
-${skipInfoText}
-
-الخطوة ١ — ابحث في الصورة عن إجابة هذا السؤال تحديداً (${q.displayLabel || q.label}):
-إذا لم تجد كتابة → studentAnswer="" و status="unanswered" و grade=0. توقف.
-
-الخطوة ٢ — انقل الناتج النهائي بدقة تامة:
-⚠️ الناتج في الصورة قد يكون خاطئاً رياضياً — انقله كما هو ولا تصحح.
-مثال: الطالب كتب -٤١ → اكتب -٤١ (حتى لو الصواب -٥١).
-الناتج النهائي = آخر رقم بعد آخر = في المعادلة (في أقصى اليسار أو السطر الأخير).
-
-الخطوة ٣ — أعط الدرجة بناءً على الناتج الذي كتبه الطالب:
-الناتج صحيح رياضياً → grade = ${q.grade} (كاملة).
-الناتج خاطئ → grade = 0 أو جزئية إذا الطريقة صحيحة.
-
-أرجع JSON فقط:
-{
-  "questionId": "${q.id}",
-  "questionKey": "${q.questionKey || q.label}",
-  "displayLabel": "${q.displayLabel || q.label}",
-  "studentAnswer": "ما كتبه الطالب حرفياً",
-  "studentAnswerNormalized": "",
-  "studentFinalResult": "الناتج كما كتبه الطالب في الصورة",
-  "studentFinalResultNormalized": "",
-  "grade": 0,
-  "maxGrade": ${q.grade},
-  "confidence": 0.95,
-  "feedback": "تقييم مختصر",
-  "status": "graded | unanswered | skipped",
-  "needsReview": false,
-  "isStudentAnswerCopiedFromModelRisk": false,
-  "box": [0, 0, 0, 0],
-  "pageIndex": 0
-}`;
-
-    const mathSystemInstruction = `أنت قارئ ومصحح للأسئلة الحسابية.
-القاعدة الأولى: انقل الناتج الذي تراه في الصورة كما هو — حتى لو كان خاطئاً رياضياً.
-إذا كتب -٤١ → اكتب -٤١. إذا كتب ١٢ → اكتب ١٢. لا تصحح الأرقام.
-القاعدة الثانية: إذا لم تر كتابة للسؤال → studentAnswer="" و grade=0.
-القاعدة الثالثة: الناتج في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
-القاعدة الرابعة: بعد النقل الحرفي، قارن الناتج بالإجابة النموذجية لإعطاء الدرجة.`;
-
-    const CONCURRENT = 3;
-    for (let i = 0; i < mathQs.length; i += CONCURRENT) {
-      const batch = mathQs.slice(i, i + CONCURRENT);
-      const batchResults = await Promise.all(
-        batch.map(async (q: any) => {
-          const isSkipCandidate = skipCandidates[q.id];
-          const qSkipInfo = isSkipCandidate
-            ? `حق الترك: هذا السؤال ضمن مجموعة يُطلب الإجابة عن ${isSkipCandidate.requiredCount} منها فقط.`
-            : '';
-          try {
-            const qParts: any[] = [
-              ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
-              { text: makeMathPrompt(q, qSkipInfo) }
-            ];
-            const qResponse = await generateWithGeminiFallback({
-              contents: { parts: qParts },
-              config: { responseMimeType: "application/json", temperature: 0, systemInstruction: mathSystemInstruction }
-            });
-            const qData = JSON.parse(cleanJson(qResponse.text || '{}'));
-            return { ...qData, questionId: q.id };
-          } catch {
-            return {
-              questionId: q.id, questionKey: q.questionKey || q.label,
-              displayLabel: q.displayLabel || q.label, studentAnswer: '',
-              studentFinalResult: '', grade: 0, maxGrade: q.grade,
-              confidence: 0, feedback: 'فشل استخراج الإجابة.', status: 'unanswered', needsReview: true
-            };
-          }
-        })
-      );
-      allGradingsRaw.push(...batchResults);
-      if (onProgress) onProgress(Math.min(90, 40 + Math.floor((i + CONCURRENT) / mathQs.length * 50)), 100, 'grading');
-    }
-
-    const data = { results: [{ studentName: 'طالب غير معروف', gradings: allGradingsRaw }] };
+    const data = JSON.parse(cleanJson(response.text || '{}'));
+    const allGradingsRaw: any[] = data.results?.[0]?.gradings || data.gradings || [];
 
     if (onProgress) onProgress(100, 100, 'grading');
 
