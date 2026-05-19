@@ -555,9 +555,13 @@ function buildMathAuditNote(g: any, question: any, maxGrade: number): { needsRev
   const copiedRisk = looksLikeCopiedModel(g.studentAnswer, question.answer);
   const suspiciousFullGrade = isFullGrade(Number(g.grade), maxGrade) && finalNorm && modelNorm && !modelNorm.includes(finalNorm);
 
+  const notes: string[] = [];
+  if (copiedRisk) notes.push('تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب، يحتاج مراجعة للتأكد أنه من الورقة.');
+  if (suspiciousFullGrade) notes.push('تنبيه آلي: تم إعطاء درجة كاملة رغم أن الناتج النهائي لا يظهر داخل الإجابة النموذجية بعد التطبيع، راجع التصحيح.');
+
   return {
     needsReview: Boolean(g.needsReview || copiedRisk || suspiciousFullGrade),
-    note: ''  // ✅ لا رسائل مراجعة في feedback
+    note: notes.join(' ')
   };
 }
 
@@ -585,16 +589,10 @@ export async function gradeStudentPaper(
 
     const base64ImagesData: string[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
+      // جودة أعلى لأن التصحيح المباشر من الصورة يعتمد على قراءة الخط والرموز.
       const compressed = await compressImage(imageUrls[i], 2400, 2400, 0.92);
       base64ImagesData.push(compressed);
       if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
-    }
-
-    // ✅ صورة مكبّرة للمرحلة الأولى (القراءة) فقط — لتحسين دقة الأرقام
-    const base64ImagesForReading: string[] = [];
-    for (let i = 0; i < imageUrls.length; i++) {
-      const enlarged = await compressImage(imageUrls[i], 3200, 3200, 0.95);
-      base64ImagesForReading.push(enlarged);
     }
 
     const flattenedQuestions: any[] = [];
@@ -772,8 +770,7 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   ]
 }`;
 
-    // ✅ نستخدم الصورة المكبّرة لتحسين دقة قراءة الأرقام
-    const parts: any[] = base64ImagesForReading.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
     const response = await generateWithGeminiFallback({
@@ -783,16 +780,94 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
         temperature: 0,
         systemInstruction: `أنت معلم خبير في تصحيح أوراق الامتحان لجميع المواد.
 صحح الورقة مباشرة من الصورة كاملة دفعة واحدة.
-studentAnswer هو كتابة مرئية من ورقة الطالب فقط. ممنوع إصلاحه أو استبداله أو ملؤه من الإجابة النموذجية.
-إذا لم ترَ جواباً واضحاً لسؤال محدد، اجعله unanswered ولا تضع له جواباً.
-إذا كان جواب الطالب خاطئاً، اتركه خاطئاً في studentAnswer واشرح الخطأ في feedback فقط.
-الناتج النهائي في الكتابة العربية يكون في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
-في الأسئلة النصية افهم المطلوب والمعطيات. في الأسئلة المباشرة افحص الناتج النهائي أولاً.
-كن محافظاً: عند الشك لا تخمّن ولا تملأ الفراغات.`
+
+القاعدة الأولى — السؤال الفارغ (الأهم):
+إذا لم تر كتابة الطالب في موضع السؤال بعينك → studentAnswer="" و status="unanswered" و grade=0 بدون استثناء.
+لا تضع جواباً لأنك تعرف الحل الصحيح. لا تضع جواباً لأن الإجابة النموذجية موجودة. فقط ما تراه في الصورة.
+
+القاعدة الثانية — الناتج النهائي:
+الكتابة العربية من اليمين لليسار — الناتج النهائي يكون في أقصى اليسار أو السطر الأخير.
+مثال: ع × ١٤ = ٧- × ١٧ = ٦٨-  ← الناتج هو ٦٨- وليس ١٤ أو ١٧.
+اتبع سلسلة = من اليمين حتى آخرها — لا تأخذ أول رقم تراه.
+
+القاعدة الثالثة — النقل الحرفي:
+studentAnswer كتابة مرئية فعلاً من ورقة الطالب. ممنوع إصلاحه أو ملؤه من الإجابة النموذجية.
+إذا كان جواب الطالب خاطئاً، اتركه خاطئاً واشرح الخطأ في feedback فقط.
+عند الشك لا تخمّن ولا تملأ الفراغات — اجعله unanswered.`
       }
     });
 
     const data = JSON.parse(cleanJson(response.text || '{}'));
+
+    // ═══════════════════════════════════════════════════════════
+    // تحقق ما بعد التصحيح — يفحص الأسئلة التي أعطاها النموذج درجة
+    // ═══════════════════════════════════════════════════════════
+    const allGradingsRaw: any[] = data.results?.[0]?.gradings || data.gradings || [];
+    const gradedWithAnswer = allGradingsRaw.filter((g: any) =>
+      g.studentAnswer && g.studentAnswer.trim() && Number(g.grade) > 0
+    );
+
+    if (gradedWithAnswer.length > 0) {
+      const verifyPrompt = `انظر للصورة وتحقق من هذه الإجابات فقط.
+لكل سؤال: هل تجد كتابة الطالب في الصورة بالفعل؟
+وإذا كان الناتج النهائي المدوّن خاطئاً، صحّحه.
+
+${JSON.stringify(gradedWithAnswer.map((g: any) => ({
+  questionId: g.questionId,
+  claimedAnswer: g.studentAnswer,
+  claimedFinalResult: g.studentFinalResult || ''
+})), null, 2)}
+
+أرجع JSON فقط:
+{
+  "verifications": [
+    {
+      "questionId": "id",
+      "confirmed": true,
+      "correctedFinalResult": ""
+    }
+  ]
+}`;
+
+      try {
+        const verifyParts: any[] = [
+          ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
+          { text: verifyPrompt }
+        ];
+        const verifyResponse = await generateWithGeminiFallback({
+          contents: { parts: verifyParts },
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0,
+            systemInstruction: `أنت مدقق ورقة امتحان. مهمتك فقط: تأكيد أو نفي وجود كتابة الطالب في الصورة.
+لا تصحح. لا تحكم. فقط: هل تجد هذه الكتابة في الصورة؟
+إذا لم تجدها → confirmed: false.
+إذا وجدت الناتج النهائي مختلفاً → صحّح correctedFinalResult فقط.
+الناتج النهائي في الكتابة العربية يكون في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.`
+          }
+        });
+
+        const verifyData = JSON.parse(cleanJson(verifyResponse.text || '{}'));
+        const verifyMap = new Map((verifyData.verifications || []).map((v: any) => [String(v.questionId), v]));
+
+        allGradingsRaw.forEach((g: any) => {
+          const v = verifyMap.get(String(g.questionId));
+          if (!v) return;
+          if (v.confirmed === false) {
+            g.studentAnswer = '';
+            g.studentFinalResult = '';
+            g.grade = 0;
+            g.status = 'unanswered';
+            g.feedback = 'لم يكتب الطالب إجابة لهذا السؤال.';
+          } else if (v.correctedFinalResult && v.correctedFinalResult.trim() &&
+                     v.correctedFinalResult !== g.studentFinalResult) {
+            g.studentFinalResult = v.correctedFinalResult;
+          }
+        });
+      } catch {
+        // إذا فشل التحقق نكمل بالنتائج الأصلية
+      }
+    }
 
     if (onProgress) onProgress(100, 100, 'grading');
 
@@ -806,7 +881,9 @@ studentAnswer هو كتابة مرئية من ورقة الطالب فقط. مم
           const grade = clampGrade(g.grade, maxGrade);
           const copiedRisk = Boolean(g.isStudentAnswerCopiedFromModelRisk || looksLikeCopiedModel(g.studentAnswer, sourceQuestion?.answer));
           const audit = buildMathAuditNote(g, sourceQuestion, maxGrade);
-          const feedback = (g.feedback || '').trim();
+          const feedback = [g.feedback || '', copiedRisk ? 'تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب ويحتاج مراجعة.' : '', audit.note]
+            .filter(Boolean)
+            .join(' ');
 
           return {
             ...g,
@@ -868,7 +945,7 @@ studentAnswer هو كتابة مرئية من ورقة الطالب فقط. مم
   }
 }
 
-async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
+async function compressImage(url: string, maxWidth = 1800, maxHeight = 1800, quality = 0.85): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
