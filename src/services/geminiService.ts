@@ -673,102 +673,134 @@ export async function gradeStudentPaper(
     if (onProgress) onProgress(10, 100, 'grading');
 
     // ═══════════════════════════════════════════════════════════
-    // بناء قاموس التنسيق — الإجابة النموذجية بدون الأرقام والقيم
-    // الهدف: يعرف شكل الإجابة دون أن يعرف محتواها
-    // ═══════════════════════════════════════════════════════════
-    const buildFormatGuide = (answer: string, mode: string): string => {
-      if (mode === 'direct_math') {
-        // يُظهر هيكل المعادلة بدون أرقام
-        return answer
-          .replace(/[٠-٩0-9]+\.?[٠-٩0-9]*/g, '□')
-          .replace(/-□/g, '-□')
-          .substring(0, 60);
-      }
-      if (mode === 'word_problem') {
-        // يُظهر نوع الإجابة فقط
-        return `مسألة نصية — ${answer.length > 30 ? 'إجابة متعددة الخطوات' : 'إجابة قصيرة'}`;
-      }
-      return `نص نظري — ${answer.substring(0, 40)}...`;
-    };
-
-    // ═══════════════════════════════════════════════════════════
     // صورة مكبّرة للقراءة الدقيقة
     // ═══════════════════════════════════════════════════════════
     const base64ImagesEnlarged: string[] = [];
-    for (let i = 0; i < imageUrls.length; i++) {
-      const enlarged = await compressImage(imageUrls[i], 3200, 3200, 0.95);
+    for (const url of imageUrls) {
+      const enlarged = await compressImage(url, 3200, 3200, 0.95);
       base64ImagesEnlarged.push(enlarged);
     }
 
     if (onProgress) onProgress(20, 100, 'grading');
 
     // ═══════════════════════════════════════════════════════════
-    // طلب واحد مرتّب: السياق أولاً ثم الصورة ثم التصحيح
+    // الطلب الأول: قراءة عمياء — بدون modelAnswer
+    // النموذج لا يعرف الإجابات الصحيحة → لا يستطيع الاختراع
     // ═══════════════════════════════════════════════════════════
-    const contextPart = `═══════════════════════════════════════
-الجزء الأول: احفظ هذه المعلومات
-═══════════════════════════════════════
+    const readingPrompt = `أنت قارئ ورقة امتحان. مهمتك الوحيدة: نقل ما كتبه الطالب من الصورة.
+
+الأسئلة (بدون إجابات):
+${JSON.stringify(flattenedQuestions.map((q: any) => ({
+  id: q.id,
+  displayLabel: q.displayLabel || q.label,
+  text: q.text,
+  answerType: guessQuestionMode(q, subject)
+})), null, 2)}
+
+قواعد قراءة الورقة:
+▸ رقم الفرع يُكتب: (١ أو ١) أو ١/ في بداية أو نهاية السطر
+▸ سطر واحد قد يحتوي فرعين: ١٠-=٥÷(٧٥-)  (٣    ٤١-=(١٧-)×٣  (٢
+▸ علامة - الطويلة = سهم ← (ليست ناقص)
+▸ الإجابة قد تمتد على أكثر من سطر
+▸ الناتج = آخر رقم بعد آخر = (أقصى اليسار أو السطر الأخير)
+▸ انقل الناتج كما هو حتى لو بدا خاطئاً
+
+قاعدة الفراغ — صارمة جداً:
+إذا لم تجد كتابة الطالب للسؤال في الصورة:
+→ studentAnswer = "" و isEmpty = true
+لا تضع أي نص. لا تخمّن. إذا شككت → فارغ.
+
+أرجع JSON فقط:
+{
+  "readings": [
+    {
+      "questionId": "نفس id",
+      "studentAnswer": "ما كتبه الطالب حرفياً — فارغ إذا لم يجد",
+      "studentFinalResult": "آخر ناتج كتبه الطالب — فارغ إذا لم يجد",
+      "isEmpty": false,
+      "confidence": 0.95
+    }
+  ]
+}`;
+
+    const readingParts: any[] = [
+      ...base64ImagesEnlarged.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
+      { text: readingPrompt }
+    ];
+
+    let readings: any[] = [];
+    try {
+      const readingResponse = await generateWithGeminiFallback({
+        contents: { parts: readingParts },
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0,
+          systemInstruction: `أنت قارئ ورقة امتحان متخصص. لا تعرف الإجابات الصحيحة ولا يجب أن تعرفها.
+مهمتك فقط: نقل ما تراه في الصورة.
+القاعدة الذهبية: إذا لم تر كتابة الطالب → studentAnswer="" و isEmpty=true. لا استثناء.
+الكتابة الخاطئة تُنقل خاطئة. الفراغ يبقى فارغاً.
+سطر واحد قد يحتوي فرعين — انتبه لأرقام الفروع في بداية أو نهاية السطر.`
+        }
+      });
+      const readData = JSON.parse(cleanJson(readingResponse.text || '{}'));
+      readings = readData.readings || [];
+    } catch {
+      readings = [];
+    }
+
+    if (onProgress) onProgress(55, 100, 'grading');
+
+    // بناء مدخلات التصحيح من نتائج القراءة
+    const readingMap = new Map(readings.map((r: any) => [String(r.questionId), r]));
+    const gradingInput = flattenedQuestions.map((q: any) => {
+      const r = readingMap.get(String(q.id));
+      const isEmpty = !r || r.isEmpty === true || !(r.studentAnswer || '').trim();
+      return {
+        id: q.id,
+        questionKey: q.questionKey || q.label,
+        displayLabel: q.displayLabel || q.label,
+        text: q.text,
+        modelAnswer: q.answer,
+        maxGrade: q.grade,
+        type: q.type,
+        answerType: guessQuestionMode(q, subject),
+        studentAnswer: isEmpty ? '' : (r?.studentAnswer || ''),
+        studentFinalResult: isEmpty ? '' : (r?.studentFinalResult || ''),
+        isEmpty,
+        readingConfidence: r?.confidence ?? 0
+      };
+    });
+
+    // ═══════════════════════════════════════════════════════════
+    // الطلب الثاني: تصحيح نصي — بدون صورة
+    // النموذج يقارن نصاً بنص فقط → موثوق ومستقر
+    // ═══════════════════════════════════════════════════════════
+    const scoringPrompt = `أنت مصحح امتحانات خبير. صحّح بناءً على النصوص فقط.
 
 المادة: ${subject} | الدرجة الكلية: ${totalExamGrade}
 عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
 ${skipInfo}
 
-الأسئلة مع قاموس التنسيق (شكل الإجابة بدون قيمها):
-${JSON.stringify(flattenedQuestions.map((q: any) => ({
-  id: q.id,
-  displayLabel: q.displayLabel || q.label,
-  text: q.text,
-  modelAnswer: q.answer,
-  formatGuide: buildFormatGuide(q.answer, guessQuestionMode(q, subject)),
-  answerType: guessQuestionMode(q, subject),
-  maxGrade: q.grade,
-  type: q.type
-})), null, 2)}
+إجابات الطالب مع الإجابات النموذجية:
+${JSON.stringify(gradingInput, null, 2)}
 
-تعليمات استخدام formatGuide:
-▸ formatGuide يُريك شكل الإجابة المتوقعة (معادلة؟ كسر؟ نص؟)
-▸ استخدمه لتمييز الحروف من الأرقام (مثل ح أو ع في الفيزياء)
-▸ ممنوع نسخ أي قيمة من modelAnswer إلى studentAnswer
+قواعد التصحيح:
+▌ isEmpty=true أو studentAnswer فارغ:
+  → grade=0، status="unanswered"، feedback="لم يكتب الطالب إجابة."
 
-═══════════════════════════════════════
-الجزء الثاني: قواعد قراءة الصورة
-═══════════════════════════════════════
+▌ حسابي (direct_math):
+  قارن studentFinalResult بالناتج الصحيح في modelAnswer رياضياً.
+  تطابقا → grade كاملة.
+  اختلفا + الطريقة صحيحة → درجة جزئية (50-70%).
+  الطريقة خاطئة → grade = 0.
 
-ستنظر الآن لصورة مكبّرة لورقة الطالب. اتبع هذه القواعد:
+▌ مسألة نصية (word_problem):
+  قيّم المعطيات والطريقة والفهم. الفكرة جزئية → درجة جزئية.
 
-تنسيق كتابة الطالب:
-▸ رقم الفرع يُكتب: (١ أو ١) أو ١/ في بداية أو نهاية السطر
-▸ سطر واحد قد يحتوي فرعين: ١٠-=٥÷(٧٥-)  (٣    ٤١-=(١٧-)×٣  (٢
-▸ علامة - الطويلة = سهم ← (ليست ناقص)
-▸ الإجابة قد تمتد على أكثر من سطر
+▌ نظري (theory):
+  قيّم المعنى والمفهوم، لا التطابق الحرفي.
 
-قاعدة الفراغ — الأهم:
-⚠️ إذا لم تجد كتابة الطالب للسؤال في الصورة:
-  studentAnswer = "" و status = "unanswered" و grade = 0
-لا تضع جواباً لأنك تعرف النموذجي. لا تخمّن. إذا شككت → فارغ.
-
-قاعدة النقل الحرفي:
-انقل ما كتبه الطالب كما هو بالضبط — حتى لو كان خاطئاً.
-الناتج النهائي = آخر رقم بعد آخر = (أقصى اليسار أو السطر الأخير).
-اتبع سلسلة = حتى آخرها.
-
-═══════════════════════════════════════
-الجزء الثالث: التصحيح بعد القراءة
-═══════════════════════════════════════
-
-بعد قراءة الصورة، صحّح بناءً على modelAnswer:
-
-حسابي (direct_math):
-  الناتج الذي قرأته صحيح رياضياً → grade كاملة
-  خاطئ والطريقة صحيحة → درجة جزئية (50-70%)
-  خاطئ والطريقة خاطئة → grade = 0
-
-مسألة نصية (word_problem):
-  قيّم المعطيات والطريقة والفهم
-
-نظري (theory):
-  قيّم المعنى والمفهوم
-
+لا تعدّل studentAnswer أو studentFinalResult.
 feedback مختصر بالعربية.
 
 أرجع JSON فقط:
@@ -777,16 +809,16 @@ feedback مختصر بالعربية.
     "studentName": "طالب غير معروف",
     "gradings": [{
       "questionId": "نفس id",
-      "questionKey": "نفس questionKey أو label",
+      "questionKey": "نفس questionKey",
       "displayLabel": "نفس displayLabel",
-      "studentAnswer": "ما قرأته من الصورة حرفياً — فارغ إذا لم يكتب",
+      "studentAnswer": "من gradingInput — لا تعدّل",
       "studentAnswerNormalized": "",
-      "studentFinalResult": "آخر ناتج قرأته — فارغ إذا لم يكتب",
+      "studentFinalResult": "من gradingInput — لا تعدّل",
       "studentFinalResultNormalized": "",
       "grade": 0,
       "maxGrade": 0,
       "confidence": 0.95,
-      "feedback": "تقييم مختصر بالعربية",
+      "feedback": "تقييم مختصر",
       "status": "graded | unanswered | skipped",
       "needsReview": false,
       "isStudentAnswerCopiedFromModelRisk": false,
@@ -796,32 +828,15 @@ feedback مختصر بالعربية.
   }]
 }`;
 
-    const gradingParts: any[] = [
-      { text: contextPart },
-      ...base64ImagesEnlarged.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
-      { text: `[الصورة المكبّرة أعلاه — اقرأ ورقة الطالب وطبّق قواعد القراءة والتصحيح]` }
-    ];
-
     const response = await generateWithGeminiFallback({
-      contents: { parts: gradingParts },
+      contents: { parts: [{ text: scoringPrompt }] },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: `أنت معلم خبير في تصحيح أوراق الامتحان.
-عملك في ثلاث مراحل:
-
-١) احفظ الأسئلة والإجابات النموذجية (modelAnswer) وقاموس التنسيق (formatGuide).
-   formatGuide = شكل الإجابة فقط، لا قيمها.
-   استخدمه لتمييز الرموز والحروف في الخط اليدوي.
-
-٢) اقرأ الصورة المكبّرة بدقة:
-   - انقل ما كتبه الطالب كما هو — الخطأ يُنقل خطأ.
-   - إذا لم تجد كتابة للسؤال → studentAnswer="" و grade=0 و status="unanswered".
-   - لا تضع جواباً لأنك تعرف النموذجي. إذا شككت → فارغ.
-   - سطر واحد قد يحتوي فرعين — انتبه لأرقام الفروع.
-   - الناتج في أقصى اليسار أو السطر الأخير.
-
-٣) صحّح بناءً على modelAnswer وما قرأته.`
+        systemInstruction: `أنت مصحح امتحانات. تعمل على نصوص فقط — لا صور.
+إذا isEmpty=true أو studentAnswer فارغ → grade=0 و status="unanswered" بدون نقاش.
+لا تعدّل studentAnswer أو studentFinalResult أبداً — انقلهما كما وردا.
+feedback مختصر بالعربية فقط.`
       }
     });
 
