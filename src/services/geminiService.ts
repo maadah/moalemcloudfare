@@ -674,7 +674,7 @@ export async function gradeStudentPaper(
     // التصحيح — طلب منفصل لكل سؤال
     // النموذج يركز على سؤال واحد فقط → دقة أعلى في القراءة والتصحيح
     // ═══════════════════════════════════════════════════════════
-    const makeQuestionPrompt = (q: any, skipInfoText: string) => `أنت معلم خبير. ركّز على هذا السؤال الواحد فقط في الصورة.
+    const makeQuestionPrompt = (q: any, skipInfoText: string) => `أنت قارئ ومصحح ورقة امتحان. ركّز على هذا السؤال الواحد فقط.
 
 السؤال المطلوب:
 ${JSON.stringify({
@@ -690,33 +690,36 @@ ${JSON.stringify({
 المادة: ${subject}
 ${skipInfoText}
 
-خطوات العمل:
-١) ابحث في الصورة عن إجابة هذا السؤال تحديداً (${q.displayLabel || q.label}).
-   - ابحث عن الرقم أو الحرف الذي يمثل هذا السؤال في الورقة.
-   - انظر للمنطقة المقابلة له في الصورة.
+الخطوة ١ — ابحث عن إجابة هذا السؤال في الصورة:
+ابحث عن الرقم/الحرف الذي يمثل هذا السؤال (${q.displayLabel || q.label}) في الورقة.
 
-٢) إذا لم تجد كتابة واضحة لهذا السؤال:
-   → studentAnswer = ""، status = "unanswered"، grade = 0. توقف.
+الخطوة ٢ — إذا لم تجد كتابة واضحة:
+→ studentAnswer = ""، status = "unanswered"، grade = 0. توقف.
 
-٣) إذا وجدت كتابة، انقلها حرفياً كما هي:
-   - لا تصحح الأرقام. لا تكمل الحل. فقط انقل ما تراه.
-   - الناتج النهائي = آخر رقم بعد آخر علامة = في المعادلة.
-   - في الكتابة العربية: الناتج في أقصى اليسار أو السطر الأخير.
-   - مثال: ٣ × (-١٧) = -٤١ → studentFinalResult = "-٤١" (وليس -٥١).
+الخطوة ٣ — إذا وجدت كتابة، انقل الناتج النهائي بدقة تامة:
+⚠️ تحذير بالغ الأهمية: الناتج الذي تراه في الصورة قد يكون خاطئاً رياضياً — وهذا مقصود.
+انقله كما هو بالضبط. لا تصحح. لا تستبدل برقم "أصح".
+مثال: إذا الطالب كتب -٤١ في الصورة، اكتب -٤١ حتى لو الصواب هو -٥١.
+مثال: إذا الطالب كتب ١٢ في الصورة، اكتب ١٢ حتى لو الصواب هو ١٤.
 
-٤) بعد نقل الجواب، قارنه بالإجابة النموذجية وأعط الدرجة:
-   - الناتج صحيح → grade كاملة.
-   - الناتج خاطئ → grade = 0 أو جزئية حسب الطريقة.
-   - في الأسئلة النظرية: قيّم المعنى لا التطابق الحرفي.
+الناتج النهائي = آخر رقم بعد آخر علامة = في المعادلة:
+- في سطر واحد: الناتج في أقصى اليسار
+- في سطرين: الناتج في السطر الثاني أو الأخير
+- اتبع سلسلة = حتى آخرها — لا تأخذ أول رقم تراه
+
+الخطوة ٤ — بعد نقل الجواب كما هو، قارنه بالإجابة النموذجية وأعط الدرجة:
+- الناتج الذي كتبه الطالب صحيح رياضياً → grade كاملة
+- الناتج الذي كتبه الطالب خاطئ → grade = 0 أو جزئية حسب الطريقة
+- في الأسئلة النظرية: قيّم المعنى لا التطابق الحرفي
 
 أرجع JSON فقط:
 {
   "questionId": "${q.id}",
   "questionKey": "${q.questionKey || q.label}",
   "displayLabel": "${q.displayLabel || q.label}",
-  "studentAnswer": "ما كتبه الطالب — فارغ إذا لم يكتب",
+  "studentAnswer": "ما كتبه الطالب حرفياً — فارغ إذا لم يكتب",
   "studentAnswerNormalized": "",
-  "studentFinalResult": "آخر ناتج كتبه الطالب — فارغ إذا لم يكتب",
+  "studentFinalResult": "الناتج الذي كتبه الطالب كما هو في الصورة — فارغ إذا لم يكتب",
   "studentFinalResultNormalized": "",
   "grade": 0,
   "maxGrade": ${q.grade},
@@ -729,15 +732,24 @@ ${skipInfoText}
   "pageIndex": 0
 }`;
 
-    const perQuestionSystemInstruction = `أنت معلم خبير في تصحيح أوراق الامتحان.
-مهمتك: ابحث عن إجابة سؤال واحد محدد في الصورة، انقلها حرفياً، ثم صحّحها.
+    const perQuestionSystemInstruction = `أنت قارئ ومصحح ورقة امتحان متخصص.
 
-قواعد صارمة:
-- إذا لم تر كتابة الطالب للسؤال المحدد → studentAnswer="" و status="unanswered" و grade=0.
-- لا تضع جواباً لأنك تعرف الحل — فقط ما تراه في الصورة.
-- الناتج النهائي في الكتابة العربية يكون في أقصى اليسار أو السطر الأخير.
-- اتبع سلسلة = حتى آخرها — لا تأخذ أول رقم تراه.
-- الكتابة الخاطئة تُنقل خاطئة — لا تصحح في studentAnswer.`;
+القاعدة الأولى — النقل الحرفي للناتج (الأهم):
+انقل الناتج الذي كتبه الطالب في الصورة كما هو بالضبط — حتى لو كان خاطئاً رياضياً.
+إذا كتب -٤١ في الصورة → اكتب -٤١ في studentFinalResult (لا -٥١).
+إذا كتب ١٢ في الصورة → اكتب ١٢ (لا ١٤).
+أنت ناقل أمين، لا مصحح للأرقام.
+
+القاعدة الثانية — السؤال الفارغ:
+إذا لم تر كتابة الطالب للسؤال المحدد → studentAnswer="" و status="unanswered" و grade=0.
+لا تضع جواباً لأنك تعرف الحل — فقط ما تراه في الصورة.
+
+القاعدة الثالثة — الناتج النهائي في العربية:
+الكتابة من اليمين لليسار — الناتج في أقصى اليسار أو السطر الأخير.
+اتبع سلسلة = حتى آخرها — لا تأخذ أول رقم تراه.
+
+القاعدة الرابعة — التصحيح بعد النقل:
+بعد نقل الناتج كما هو، قارنه رياضياً بالإجابة النموذجية لإعطاء الدرجة.`;
 
     // إرسال طلب لكل سؤال بشكل متوازٍ (مجموعات لتجنب rate limit)
     const CONCURRENT = 3; // 3 طلبات في نفس الوقت
@@ -806,9 +818,7 @@ ${skipInfoText}
           const grade = clampGrade(g.grade, maxGrade);
           const copiedRisk = Boolean(g.isStudentAnswerCopiedFromModelRisk || looksLikeCopiedModel(g.studentAnswer, sourceQuestion?.answer));
           const audit = buildMathAuditNote(g, sourceQuestion, maxGrade);
-          const feedback = [g.feedback || '', copiedRisk ? 'تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب ويحتاج مراجعة.' : '', audit.note]
-            .filter(Boolean)
-            .join(' ');
+          const feedback = (g.feedback || '').trim();
 
           return {
             ...g,
@@ -824,6 +834,31 @@ ${skipInfoText}
             needsReview: Boolean(g.needsReview || copiedRisk || audit.needsReview),
             feedback
           };
+        });
+
+        // ── تصحيح منطق حق الترك بناءً على الإجابات الفعلية ──
+        // لكل مجموعة فروع فيها حق ترك:
+        // - إذا أجاب الطالب على أكثر من المطلوب → آخر الفروع المُجابة = حق الترك
+        // - إذا أجاب على المطلوب أو أقل → لا حق ترك (الفارغة = unanswered)
+        Object.entries(parentGroups).forEach(([parentId, { requiredCount, subIds }]) => {
+          if (requiredCount <= 0 || requiredCount >= subIds.length) return;
+
+          const byId = new Map(gradingsWithMax.map((g: any) => [String(g.questionId), g]));
+          const subGradings = subIds.map(sid => byId.get(sid)).filter(Boolean);
+
+          // الفروع التي أجاب عنها الطالب فعلاً (لها studentAnswer غير فارغ)
+          const answered = subGradings.filter((g: any) =>
+            g.studentAnswer && g.studentAnswer.trim() && g.status !== 'unanswered'
+          );
+
+          if (answered.length > requiredCount) {
+            // أجاب على أكثر من المطلوب → آخر الفروع المُجابة = حق ترك
+            const lastAnswered = answered[answered.length - 1];
+            lastAnswered.status = 'skipped';
+            lastAnswered.grade = 0;
+            lastAnswered.feedback = 'حق الترك';
+          }
+          // إذا أجاب على المطلوب أو أقل → لا نغير شيئاً، الفارغة تبقى unanswered
         });
 
         // تأكد أن كل سؤال موجود مرة واحدة على الأقل، حتى لو لم يرجعه النموذج.
