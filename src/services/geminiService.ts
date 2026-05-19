@@ -209,20 +209,9 @@ async function generateWithGeminiFallback(request: any) {
   );
 }
 
-const cleanJson = (text: string): string => {
-  // إزالة markdown backticks إن وجدت
-  let cleaned = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/, '')
-    .trim();
-
-  // استخراج أكبر كتلة JSON صالحة (من أول { إلى آخر })
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    return cleaned.slice(start, end + 1);
-  }
-  return cleaned;
+const cleanJson = (text: string) => {
+  const match = text.match(/\{[\s\S]*\}/);
+  return match ? match[0] : text;
 };
 
 export async function extractExamFromDualImages(
@@ -231,51 +220,154 @@ export async function extractExamFromDualImages(
 ): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
     const qImagesData = await Promise.all(questionImages.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1800, 1800, 0.88);
+      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
     }));
 
     const aImagesData = await Promise.all(answerImages.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1800, 1800, 0.88);
+      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
     }));
 
-    const prompt = `لديك مجموعتان من الصور:
-- [صور الأسئلة]: ورقة الأسئلة الرسمية للامتحان.
-- [الإجابات النموذجية]: الإجابة النموذجية المعدّة من المعلم.
+    const prompt = `أنت معلم خبير يقرأ ورقة طالب من الصورة ويصححها في نفس الطلب.
 
-المطلوب منك:
-استخرج من صور الأسئلة بنية الامتحان كاملة: العنوان، والأسئلة، وفروعها، ودرجاتها.
-ثم انقل الإجابة النموذجية لكل سؤال من صور الإجابات النموذجية.
+الفكرة الأساسية:
+- نريد "نقل جواب الطالب كما هو" و "تقييمه" في نفس الوقت.
+- لكن studentAnswer ليس مكان التصحيح ولا الإصلاح.
+- التصحيح والتفسير يكونان فقط داخل feedback والدرجة.
 
-قواعد الاستخراج الصارمة:
-- انقل النصوص والأرقام كما هي بدون تفسير أو تغيير.
-- حافظ على الأرقام العربية (٠-٩) كما تظهر.
-- لا تجري أي عملية حسابية — إذا رأيت 85/5 اكتبها 85/5 وليس 17.
-- لا تستنتج درجات الفروع بالقسمة — انقل فقط ما هو مكتوب صراحة.
-- رتّب الأسئلة بنفس ترتيبها في الورقة.
-- إذا كان للسؤال فروع فاجعلها subQuestions.
-- إذا كان هناك عدد محدود من الفروع المطلوب الإجابة عنها، ضعه في requiredSubCount.
+المطلوب:
+صحح ورقة الطالب كاملة مرة واحدة اعتماداً على:
+1) صورة ورقة الطالب.
+2) قائمة الأسئلة.
+3) الأجوبة النموذجية.
+4) الدرجة المحددة لكل سؤال.
+
+قواعد نقل جواب الطالب — أهم جزء:
+- studentAnswer = نقل مباشر لما كتبه الطالب فقط من الصورة.
+- ممنوع إصلاح جواب الطالب داخل studentAnswer.
+- ممنوع استبدال جواب الطالب بالجواب الصحيح.
+- ممنوع نقل الإجابة النموذجية إلى studentAnswer.
+- إذا كتب الطالب نتيجة خاطئة، اكتبها كما هي، ولا تصححها في studentAnswer.
+- إذا كتب الطالب: ٢٧ + ١٤ = ٤١ فاكتبها كما هي، ولا تحولها إلى ٢٧ - ١٤ = ١٣.
+- إذا كتب الطالب: ٣ × (-١٧) = -٤١ فاكتبها كما هي، ولا تحولها إلى -٥١.
+- إذا لم تستطع قراءة رقم أو رمز، اكتب [?] واجعل needsReview=true.
+- حافظ على شكل أرقام الطالب قدر الإمكان داخل studentAnswer: ٤٨ تبقى ٤٨ وليس 48.
+- studentAnswerNormalized و studentFinalResultNormalized فقط للمقارنة، وليس للعرض.
+
+قواعد مصدر القراءة:
+- الصورة هي المصدر الأساسي لجواب الطالب.
+- اقرأ الورقة مباشرة من الصورة، وليس من الإجابة النموذجية.
+- لا تخترع جواباً إذا لم تجده في الصورة.
+- لا تنقل جواب سؤال إلى سؤال آخر.
+- إذا لم يجب الطالب على سؤال، اجعل studentAnswer = "" و status = "unanswered" و grade = 0.
+- إذا كان له حق ترك، اجعل status = "skipped" و feedback = "حق الترك".
+
+طريقة التصحيح العامة لكل المواد:
+- افهم السؤال أولاً.
+- قارن ما كتبه الطالب بفكرة الإجابة النموذجية.
+- أعط درجة عادلة حسب مستوى جواب الطالب.
+- feedback يشرح التقييم فقط، ولا يغيّر studentAnswer.
+
+تمييز نوع السؤال أثناء التصحيح:
+1) إذا كان السؤال نصياً أو مسألة فيها كلام ومعطيات:
+   - اقرأ نص السؤال جيداً وافهم المطلوب.
+   - لا تعتمد على الناتج النهائي وحده.
+   - قيّم هل الطالب استخدم المعطيات الصحيحة وهل طريقته مناسبة.
+   - إذا استخدم الطالب رقماً خطأ من نص السؤال، اذكر ذلك في feedback.
+
+2) إذا كان السؤال مباشراً وليس مسألة نصية طويلة، مثل عملية حسابية أو معادلة أو اختيار أو تعريف قصير:
+   - انظر إلى الجواب النهائي للطالب أولاً.
+   - إذا كان الجواب النهائي يطابق الجواب النموذجي في المعنى أو القيمة، أعطه الدرجة المناسبة.
+   - إذا كان الجواب النهائي لا يطابق، لا تجعله صحيحاً.
+   - عند الخطأ، قارن خطوات الطالب مع الإجابة النموذجية لتعرف سبب الخطأ واكتبه في feedback.
+   - لا تضع الحل الصحيح داخل studentAnswer، بل داخل feedback فقط إذا احتجت.
+
+أمثلة لفهم القاعدة، ليست خاصة بالرياضيات فقط:
+- إذا كان النموذجي يقول الناتج ١٣ والطالب كتب ٤١، فـ studentAnswer يجب أن يحتوي ٤١ كما كتبها الطالب، والfeedback يشرح سبب الخطأ.
+- إذا كان النموذجي يقول -٥١ والطالب كتب -٤١، فـ studentAnswer يبقى -٤١، ولا تعتبره صحيحاً.
+- إذا كانت المسألة النصية تتطلب استخدام ١٢ والطالب استخدم ١٠، اذكر أن الخطأ في فهم أو استخراج المعطى.
+- إذا كان جواب الطالب صحيحاً لكن بصيغة مختلفة، أعطه الدرجة ولا تشترط التطابق الحرفي.
+
+قواعد حدود السؤال:
+- افهم بنية الورقة: سؤال رئيسي ← فرع ← نقطة.
+- لا تعتبر الرقم المنفرد ١ أو ٢ أو ٣ سؤالاً رئيسياً إذا كان داخل فرع أو تحت عنوان فرع.
+- السؤال الرئيسي غالباً يكون معه: س، سؤال، السؤال، مثل: س1، س١، س1/، س1:، س1)، سؤال 1.
+- الفروع قد تكتب: أ، أ/، أ-، أ)، أ:، (أ)، وكذلك ب، ج، د.
+- النقاط داخل الفرع قد تكتب: 1، ١، 1/، ١/، 1-، ١-، 1)، ١).
+- جواب السؤال يجب أن يكون داخل حدوده أو يحمل label واضحاً يربطه به.
+- إذا كتب الطالب جواباً في مكان آخر ومعه label واضح مثل س4/ب، اربطه بالسؤال الصحيح.
+- إذا الجواب بعيد ولا يوجد label واضح، لا تخمّن؛ اجعله unanswered أو needsReview ولا تملأ studentAnswer.
+- عند الشك بين "سؤال فارغ" و"جواب محتمل بعيد" اختر الأمان: unanswered + needsReview، لا تخترع إجابة.
+
+
+اختبار أمان قبل إخراج JSON:
+- لكل سؤال، اسأل نفسك: هل أرى كتابة الطالب لهذا السؤال في الصورة؟
+- إذا الجواب لا: studentAnswer=""، status="unanswered"، grade=0.
+- إذا كان studentAnswer يشبه الإجابة النموذجية لكنك لا ترى نفس الكتابة في ورقة الطالب، احذفه واجعله unanswered.
+- إذا كتبت حلاً صحيحاً من عندك داخل studentAnswer، فهذا خطأ؛ احذفه.
+- feedback هو المكان الوحيد للتصحيح وشرح الصواب، وليس studentAnswer.
+
+قواعد حق الترك:
+- إذا كان السؤال يطلب عدداً محدداً من الفروع فقط، صحح الفروع التي أجاب عنها الطالب ضمن المطلوب.
+- لا تضع حق الترك على فرع أجاب عنه الطالب.
+- الفروع الفارغة الزائدة عن المطلوب اجعلها skipped "حق الترك".
+${skipInfo}
+
+بيانات الامتحان:
+المادة: ${subject}
+عدد الأسئلة المطلوب تصحيحها: ${flattenedQuestions.length}
+الدرجة الكلية: ${totalExamGrade}
+عدد الأسئلة المطلوبة إن وجد: ${requiredQuestionsCount || 'All'}
+
+الأسئلة والأجوبة النموذجية:
+${JSON.stringify(flattenedQuestions.map((q: any) => ({
+  id: q.id,
+  questionKey: q.questionKey || q.label,
+  displayLabel: q.displayLabel || q.label,
+  text: q.text,
+  modelAnswer: q.answer,
+  maxGrade: q.grade,
+  type: q.type
+})), null, 2)}
+
+قبل إخراج JSON راجع نفسك:
+- هل studentAnswer من ورقة الطالب فقط؟
+- هل لم تنسخ الإجابة النموذجية؟
+- هل إذا كان جواب الطالب خاطئاً بقي خاطئاً داخل studentAnswer؟
+- هل وضعت التصحيح في feedback وليس في studentAnswer؟
 
 أرجع JSON فقط:
 {
-  "title": "عنوان الامتحان",
-  "requiredQuestionsCount": 0,
-  "questions": [
+  "results": [
     {
-      "id": "q1",
-      "text": "نص السؤال",
-      "answer": "الإجابة النموذجية كما هي",
-      "grade": 0,
-      "type": "text | true-false | multiple-choice | fill-in-the-blanks",
-      "requiredSubCount": 0,
-      "subQuestions": []
+      "studentName": "طالب غير معروف",
+      "gradings": [
+        {
+          "questionId": "same id from questions",
+          "questionKey": "same questionKey from questions",
+          "displayLabel": "same displayLabel from questions",
+          "studentAnswer": "نقل مباشر لما كتبه الطالب فقط، بدون إصلاح",
+          "studentAnswerNormalized": "نسخة مطبعة للمقارنة فقط",
+          "studentFinalResult": "آخر نتيجة كتبها الطالب كما هي",
+          "studentFinalResultNormalized": "آخر نتيجة مطبعة للمقارنة فقط",
+          "grade": 0,
+          "maxGrade": 0,
+          "confidence": 0.0,
+          "feedback": "تقييم مختصر وسبب الدرجة",
+          "status": "graded | unanswered | skipped",
+          "needsReview": false,
+          "isStudentAnswerCopiedFromModelRisk": false,
+          "box": [0, 0, 0, 0],
+          "pageIndex": 0
+        }
+      ]
     }
   ]
 }`;
 
     const parts: any[] = [];
-    parts.push({ text: "[صور الأسئلة]:" });
+    parts.push({ text: "QUESTIONS IMAGES:" });
     qImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: "[الإجابات النموذجية]:" });
+    parts.push({ text: "MODEL ANSWERS IMAGES:" });
     aImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
@@ -283,14 +375,8 @@ export async function extractExamFromDualImages(
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: `أنت معلم عراقي خبير. مهمتك الوحيدة: استخراج بيانات الامتحان من الصور بدقة عالية.
-قواعد صارمة:
-- استخرج النص كما هو بدون تفسير أو تصحيح أو إضافة.
-- حافظ على الأرقام العربية (٠-٩) كما هي.
-- لا تجري أي عملية حسابية — انقل الأرقام والرموز كما تظهر في الصورة.
-- إذا رأيت 85/5 في الصورة، اكتبها 85/5 وليس 17.
-- اعتمد على الصور فقط كمصدر للبيانات.`
+        temperature: 0.1,
+        systemInstruction: "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown."
       }
     });
 
@@ -309,7 +395,7 @@ export async function extractExamFromDualImages(
 export async function extractExamFromImages(base64Images: string[]): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
     const imagesData = await Promise.all(base64Images.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1800, 1800, 0.88);
+      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
     }));
 
     const prompt = `Extract questions from this Iraqi exam paper. 
@@ -332,14 +418,8 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: `أنت معلم عراقي خبير. مهمتك الوحيدة: استخراج بيانات الامتحان من الصور بدقة عالية.
-قواعد صارمة:
-- استخرج النص كما هو بدون تفسير أو تصحيح أو إضافة.
-- حافظ على الأرقام العربية (٠-٩) كما هي.
-- لا تجري أي عملية حسابية — انقل الأرقام والرموز كما تظهر في الصورة.
-- إذا رأيت 85/5 في الصورة، اكتبها 85/5 وليس 17.
-- اعتمد على الصور فقط كمصدر للبيانات.`
+        temperature: 0.1,
+        systemInstruction: "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears."
       }
     });
 
@@ -470,30 +550,14 @@ function isFullGrade(grade: number, maxGrade: number): boolean {
 function buildMathAuditNote(g: any, question: any, maxGrade: number): { needsReview: boolean; note: string } {
   if (!question) return { needsReview: Boolean(g.needsReview), note: '' };
   const finalNorm = normalizeMathText(g.studentFinalResultNormalized || g.studentFinalResult || '');
-  const studentNorm = normalizeMathText(g.studentAnswerNormalized || g.studentAnswer || '');
   const modelNorm = normalizeMathText(question.answer || '');
 
   const copiedRisk = looksLikeCopiedModel(g.studentAnswer, question.answer);
-
-  // تحذير: درجة كاملة لكن الناتج النهائي لا يظهر في الإجابة النموذجية
-  const suspiciousFullGrade = isFullGrade(Number(g.grade), maxGrade) &&
-    finalNorm && modelNorm && !modelNorm.includes(finalNorm) && !finalNorm.includes(modelNorm);
-
-  // تحذير: درجة كاملة لكن جواب الطالب المطبّع لا يتطابق مع الإجابة النموذجية المطبّعة
-  const suspiciousAnswerMismatch = isFullGrade(Number(g.grade), maxGrade) &&
-    studentNorm && modelNorm &&
-    studentNorm.length > 1 && modelNorm.length > 1 &&
-    !modelNorm.includes(studentNorm) && !studentNorm.includes(modelNorm) &&
-    normalizeMathText(studentNorm) !== normalizeMathText(modelNorm);
-
-  const notes: string[] = [];
-  if (copiedRisk) notes.push('تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب، يحتاج مراجعة للتأكد أنه من الورقة.');
-  if (suspiciousFullGrade) notes.push('تنبيه آلي: درجة كاملة لكن الناتج النهائي لا يتطابق مع النموذجي — راجع التصحيح.');
-  if (suspiciousAnswerMismatch && !suspiciousFullGrade) notes.push('تنبيه آلي: جواب الطالب لا يتطابق مع الإجابة النموذجية لكن أُعطيت درجة كاملة — راجع.');
+  const suspiciousFullGrade = isFullGrade(Number(g.grade), maxGrade) && finalNorm && modelNorm && !modelNorm.includes(finalNorm);
 
   return {
-    needsReview: Boolean(g.needsReview || copiedRisk || suspiciousFullGrade || suspiciousAnswerMismatch),
-    note: notes.join(' ')
+    needsReview: Boolean(g.needsReview || copiedRisk || suspiciousFullGrade),
+    note: ''  // ✅ لا رسائل مراجعة في feedback
   };
 }
 
@@ -506,53 +570,6 @@ function guessQuestionMode(q: Question, subject: string): 'direct_math' | 'word_
   if (hasWords && mathSymbols) return 'word_problem';
   if (mathSymbols) return 'direct_math';
   return 'theory';
-}
-
-// ═══════════════════════════════════════════════════════════
-// دالة اقتصاص الصورة — تقسّم صورة الورقة لشرائح حسب عدد الأسئلة
-// كل شريحة تمثل منطقة سؤال واحد مكبّرة وواضحة
-// ═══════════════════════════════════════════════════════════
-async function cropQuestionRegions(
-  base64Image: string,
-  questionCount: number,
-  overlapRatio: number = 0.15
-): Promise<string[]> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const totalHeight = img.naturalHeight;
-      const totalWidth = img.naturalWidth;
-      const sliceHeight = Math.floor(totalHeight / questionCount);
-      const overlapPx = Math.floor(sliceHeight * overlapRatio);
-      const crops: string[] = [];
-
-      for (let i = 0; i < questionCount; i++) {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d')!;
-
-        // تحديد منطقة الاقتصاص مع تداخل للتأكد من عدم قطع إجابة
-        const yStart = Math.max(0, i * sliceHeight - overlapPx);
-        const yEnd = Math.min(totalHeight, (i + 1) * sliceHeight + overlapPx);
-        const cropH = yEnd - yStart;
-
-        // تكبير الشريحة ×1.5 لوضوح أفضل
-        const scale = 1.5;
-        canvas.width = Math.floor(totalWidth * scale);
-        canvas.height = Math.floor(cropH * scale);
-
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, yStart, totalWidth, cropH, 0, 0, canvas.width, canvas.height);
-
-        // جودة عالية للشريحة
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        crops.push(dataUrl.split(',')[1]); // base64 فقط
-      }
-      resolve(crops);
-    };
-    img.onerror = () => resolve([]); // fallback: لا اقتصاص
-    img.src = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${base64Image}`;
-  });
 }
 
 export async function gradeStudentPaper(
@@ -568,10 +585,16 @@ export async function gradeStudentPaper(
 
     const base64ImagesData: string[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
-      // جودة أعلى لأن التصحيح المباشر من الصورة يعتمد على قراءة الخط والرموز.
       const compressed = await compressImage(imageUrls[i], 2400, 2400, 0.92);
       base64ImagesData.push(compressed);
       if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
+    }
+
+    // ✅ صورة مكبّرة للمرحلة الأولى (القراءة) فقط — لتحسين دقة الأرقام
+    const base64ImagesForReading: string[] = [];
+    for (let i = 0; i < imageUrls.length; i++) {
+      const enlarged = await compressImage(imageUrls[i], 3200, 3200, 0.95);
+      base64ImagesForReading.push(enlarged);
     }
 
     const flattenedQuestions: any[] = [];
@@ -638,323 +661,87 @@ export async function gradeStudentPaper(
       ? `\n\nمعلومات حق الترك:\n${JSON.stringify(skipCandidates, null, 2)}`
       : '';
 
-    // ═══════════════════════════════════════════════════════════
-    // تصنيف الأسئلة: حسابية مباشرة / مسائل نصية / نظرية
-    // ═══════════════════════════════════════════════════════════
-    const mathQuestions = flattenedQuestions.filter((q: any) =>
-      guessQuestionMode(q, subject) === 'direct_math'
-    );
-    const otherQuestions = flattenedQuestions.filter((q: any) =>
-      guessQuestionMode(q, subject) !== 'direct_math'
-    );
+    const prompt = `أنت معلم خبير يقيّم ورقة طالب مباشرة من الصورة.
 
-    if (onProgress) onProgress(10, 100, 'grading');
+المطلوب:
+صحح ورقة الطالب كاملة مرة واحدة اعتماداً على:
+1) صورة ورقة الطالب.
+2) قائمة الأسئلة.
+3) الأجوبة النموذجية.
+4) الدرجات المحددة لكل سؤال.
 
-    // ═══════════════════════════════════════════════════════════
-    // المرحلة الأولى: القراءة — صورة كاملة + جميع الأسئلة
-    // ═══════════════════════════════════════════════════════════
-    const readingPrompt = `أنت قارئ ورقة امتحان متخصص. مهمتك الوحيدة: نقل ما كتبه الطالب بخط يده من الصورة.
+اجعل التصحيح عاماً ومناسباً لكل المناهج الدراسية، وليس للرياضيات فقط.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- كيف تستخدم الإجابة النموذجية — مهم جداً
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-الإجابة النموذجية هي "قاموس تنسيق" فقط — تُريك كيف تُكتب الرموز في هذا الامتحان.
-▸ إذا النموذجية فيها (ح) → فالطالب لو كتب شيئاً يشبه (4) بجانب معادلة، اعلم أنه ح وليس 4
-▸ إذا النموذجية فيها (ع) → فالطالب لو كتب شيئاً يشبه (ع أو 3) في سياق فيزياء، اعلم أنه ع
-▸ إذا النموذجية فيها (م²) → حافظ على نفس الرمز إذا رأيته في ورقة الطالب
-⚠️ ممنوع منعاً باتاً: نسخ قيمة أو رقم أو نتيجة من الإجابة النموذجية إلى studentAnswer.
+القواعد الأساسية — مهمة جداً:
+- الصورة هي المصدر الأساسي والوحيد لجواب الطالب.
+- اقرأ الورقة مباشرة من الصورة، ولا تعتمد على OCR منفصل.
+- لا تصحح سؤالاً سؤالاً في طلبات منفصلة؛ قيّم الورقة كاملة مع فهم مكان كل جواب.
+- لا تنسخ الإجابة النموذجية داخل studentAnswer أبداً.
+- لا تُصلح جواب الطالب داخل studentAnswer أبداً.
+- لا تكتب ما كان يجب أن يكتبه الطالب داخل studentAnswer.
+- studentAnswer يجب أن يكون كتابة مرئية فعلاً في ورقة الطالب، وليست استنتاجاً.
+- إذا لم ترَ كتابة واضحة تخص هذا السؤال تحديداً، اجعل studentAnswer = "" و status = "unanswered" و grade = 0.
+- لا تضع جواباً في studentAnswer لمجرد أن الإجابة النموذجية موجودة أو لأنك تعرف الحل الصحيح.
+- لا تستخدم جواب سؤال قريب أو فرع قريب لتعبئة سؤال فارغ.
+- إذا كنت غير متأكد بنسبة قوية أن هذه الكتابة تخص هذا السؤال، لا تنقلها؛ اجعل studentAnswer = "" و status = "unanswered" و needsReview = true.
+- إذا كان له حق ترك، اجعل status = "skipped" و feedback = "حق الترك".
+- إذا كانت الكتابة موجودة لكنها غير واضحة، استخرج ما تستطيع فقط من الصورة واجعل needsReview = true.
+- لا تخترع جواباً للطالب من السؤال أو من الإجابة النموذجية.
+- لا تنقل جواب سؤال إلى سؤال آخر.
+- حافظ على أرقام الطالب كما تظهر في studentAnswer إن أمكن، مثل ٤٨ وليس 48.
+- يمكن وضع نسخة normalized في studentAnswerNormalized و studentFinalResultNormalized للمقارنة فقط.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- قاعدة السؤال الفارغ — الأهم على الإطلاق
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-إذا لم تر كتابة الطالب في موضع السؤال:
-  → studentAnswer = "" (فارغ تماماً)
-  → studentFinalResult = ""
-  → isEmpty = true
-  → rawVisual = "لا توجد كتابة في موضع هذا السؤال"
-لا تضع أي نص في studentAnswer إذا لم تره بعينك في الصورة.
-لا تستنتج. لا تكمل. لا تفترض. إذا شككت → فارغ.
+طريقة التقييم العامة:
+- افهم السؤال أولاً ثم قارن جواب الطالب بفكرة الإجابة النموذجية.
+- في الأسئلة النظرية: قيّم المعنى والمفاهيم الأساسية، وليس التطابق الحرفي.
+- في الأسئلة العملية أو الرقمية: انظر إلى النتيجة النهائية أولاً إن كانت واضحة.
+- إذا كانت النتيجة النهائية صحيحة، أعط الدرجة المناسبة بدون تحليل طويل.
+- إذا كانت النتيجة النهائية خاطئة، راجع خطوات الطالب وحدد سبب الخطأ من خلال السؤال والإجابة النموذجية.
+- إذا كانت الفكرة صحيحة لكن يوجد خطأ جزئي، أعط درجة جزئية.
+- إذا كان جواب الطالب خارج المطلوب أو لا يجيب عن السؤال، أعطه الدرجة المناسبة لذلك.
+- feedback يكون مختصراً وواضحاً بالعربية، ويذكر سبب الدرجة.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- كيف تحدد الناتج النهائي في الكتابة العربية اليدوية
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-الكتابة العربية من اليمين لليسار — الناتج النهائي في أقصى اليسار أو السطر الأخير:
-▸ الناتج النهائي = الرقم الذي يأتي بعد آخر علامة = في المعادلة كاملة
-▸ في سطر واحد: الناتج في أقصى اليسار
-   مثال: ع × ١٤ = ٧- × ١٧ = ٦٨-   ← الناتج هو ٦٨- وليس ١٤ أو ١٧
-▸ في سطرين: الناتج في السطر الثاني أو الأخير
-   مثال: السطر الأول: (١٤ + ٣) = ١٧ × ٢ = ٣٤ - ٦
-          السطر الثاني: = ٦٨-   ← الناتج هو ٦٨-
-▸ لا تأخذ أول رقم تراه — اتبع سلسلة = حتى آخرها
-▸ إذا المعادلة تنتهي بسهم ← ثم رقم → ذلك الرقم هو الناتج
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- قواعد النقل الحرفي
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ الكتابة الخاطئة تُنقل خاطئة — هذا صحيح ومطلوب
-▸ إذا جزء غير واضح: انقل ما تستطيع + [؟] للغامض
-▸ إذا لم تجد الإجابة في موضعها، ابحث في بقية الصفحة عن تسمية واضحة تربطها بالسؤال
-▸ إذا كتابة بدون تسمية واضحة في مكان بعيد → isEmpty=true
-
-أسئلة الامتحان مع قاموس التنسيق:
-${JSON.stringify(flattenedQuestions.map((q: any) => ({
-  id: q.id,
-  questionKey: q.questionKey || q.label,
-  displayLabel: q.displayLabel || q.label,
-  text: q.text,
-  type: q.type,
-  mode: guessQuestionMode(q, subject),
-  formatGuide: q.answer
-})), null, 2)}
-
-أرجع JSON فقط:
-{
-  "readings": [
-    {
-      "questionId": "نفس id من القائمة",
-      "mode": "direct_math | word_problem | theory",
-      "rawVisual": "وصف حرفي دقيق لما تراه في موضع هذا السؤال، أو: لا توجد كتابة",
-      "studentAnswer": "ما كتبه الطالب حرفياً — فارغ تماماً إذا لم يكتب",
-      "studentFinalResult": "آخر ناتج كتبه الطالب كما هو — فارغ إذا لم يكتب",
-      "confidence": 0.95,
-      "isEmpty": false
-    }
-  ]
-}`;
-
-    const readingParts: any[] = [
-      ...base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } })),
-      { text: readingPrompt }
-    ];
-
-    const readingResponse = await generateWithGeminiFallback({
-      contents: { parts: readingParts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: `أنت قارئ ورقة امتحان متخصص بالخط العربي اليدوي.
-مهمتك: نقل ما تراه بخط الطالب من الصورة فقط — لا تحكم، لا تصحح، لا تستنتج.
-السؤال الفارغ: إذا لم تر كتابة → studentAnswer="" و isEmpty=true بدون استثناء.
-اتجاه القراءة: الناتج النهائي في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
-قاموس التنسيق: formatGuide للرموز فقط — ممنوع نسخ أي قيمة منه.
-النقل الحرفي: الكتابة الخاطئة تُنقل خاطئة كما هي.`
-      }
-    });
-
-    const readingData = JSON.parse(cleanJson(readingResponse.text || '{}'));
-    const readings: any[] = readingData.readings || [];
-    console.log('[READING PHASE]', JSON.stringify(readings, null, 2));
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- كيف تستخدم الإجابة النموذجية — مهم جداً
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-الإجابة النموذجية هي "قاموس تنسيق" فقط — تُريك كيف تُكتب الرموز في هذا الامتحان.
-أمثلة على الاستخدام الصحيح:
-▸ إذا النموذجية فيها (ح) → فالطالب لو كتب شيئاً يشبه (4) بجانب معادلة، اعلم أنه ح وليس 4
-▸ إذا النموذجية فيها (ع) → فالطالب لو كتب شيئاً يشبه (ع أو 3) في سياق فيزياء، اعلم أنه ع
-▸ إذا النموذجية فيها (م²) → حافظ على نفس الرمز إذا رأيته في ورقة الطالب
-▸ إذا النموذجية فيها (ح/٣) → إذا رأيت كسراً مشابهاً، استخدم نفس الصيغة
-
-⚠️ ممنوع منعاً باتاً: نسخ قيمة أو رقم أو نتيجة من الإجابة النموذجية إلى studentAnswer.
-الإجابة النموذجية تُعلمك شكل الكتابة فقط — ليس المحتوى.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- قاعدة السؤال الفارغ — الأهم على الإطلاق
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-إذا لم تر كتابة الطالب في موضع السؤال:
-  → studentAnswer = "" (فارغ تماماً)
-  → studentFinalResult = ""
-  → isEmpty = true
-  → rawVisual = "لا توجد كتابة في موضع هذا السؤال"
-
-لا تضع أي نص في studentAnswer إذا لم تره بعينك في الصورة.
-لا تستنتج. لا تكمل. لا تفترض. إذا شككت → فارغ.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- كيف تحدد الناتج النهائي في الكتابة العربية اليدوية
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-الكتابة العربية من اليمين لليسار — هذا يؤثر على موضع الناتج:
-
-▸ الناتج النهائي = الرقم الذي يأتي بعد آخر علامة = في المعادلة كاملة
-▸ في سطر واحد: الناتج في أقصى اليسار (آخر شيء يُكتب)
-   مثال: ع × ١٤ = ٧- × ١٧ = ٦٨-   ← الناتج هو ٦٨- وليس ١٤ أو ١٧
-▸ في سطرين: الناتج في السطر الثاني أو الأخير
-   مثال: السطر الأول: (١٤ + ٣) = ١٧ × ٢ = ٣٤ - ٦
-          السطر الثاني: = ٦٨-   ← الناتج هو ٦٨-
-▸ إذا رأيت = في نهاية سطر ثم رقم في بداية السطر التالي → ذلك هو الناتج
-▸ لا تأخذ أول رقم تراه — اتبع سلسلة = حتى آخرها
-▸ إذا المعادلة تنتهي بسهم ← ثم رقم → ذلك الرقم هو الناتج
-
-أمثلة توضيحية:
-  ٦٨- = ٤ × ١٧-   ←   studentFinalResult = "٦٨-"
-  ٢٨ = ٦ - ٣٤ = ٢ × ١٧  ←  studentFinalResult = "٢٨"
-  ح = ٢١ ← ١/ح = ١/٢١  ←  studentFinalResult = "٢١"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-للأسئلة الحسابية المباشرة (mode: direct_math):
-  ▸ ابحث عن آخر ناتج كتبه الطالب بعد علامة =
-  ▸ انقله في studentFinalResult كما هو: -٤١ تبقى -٤١، ٢٠ تبقى ٢٠
-  ▸ لا تحسب. لا تتحقق. فقط انقل ما تراه.
-  ▸ إذا رأيت الخطوات أيضاً، انقلها في studentAnswer
-
-للأسئلة النظرية والنصية (mode: word_problem | theory):
-  ▸ انقل ما كتبه الطالب كاملاً حرفياً
-  ▸ استخدم قاموس التنسيق من الإجابة النموذجية للرموز غير الواضحة فقط
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- قواعد النقل الحرفي
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ الكتابة الخاطئة تُنقل خاطئة — هذا صحيح ومطلوب
-▸ الكتابة الناقصة تُنقل ناقصة
-▸ إذا جزء غير واضح: انقل ما تستطيع + [؟] للغامض
-▸ إذا لم تجد الإجابة في موضعها المتوقع، ابحث في بقية الصفحة عن تسمية واضحة (مثل: س٥/ب، أو ٥ب، أو رقم السؤال) ثم انقل ما بعدها
-▸ إذا وجدت كتابة بدون تسمية في مكان بعيد → isEmpty=true (لا تخمّن)
-▸ إذا الورقة فيها كتابة في المنطقة المتوقعة لكنها غير واضحة → انقل ما تستطيع + [؟] وlا تجعلها isEmpty
-
-أسئلة الامتحان مع قاموس التنسيق:
-${JSON.stringify(flattenedQuestions.map((q: any) => ({
-  id: q.id,
-  questionKey: q.questionKey || q.label,
-  displayLabel: q.displayLabel || q.label,
-  text: q.text,
-  type: q.type,
-  mode: guessQuestionMode(q, subject),
-  formatGuide: q.answer  // الإجابة النموذجية كمرجع تنسيق فقط
-})), null, 2)}
-
-أرجع JSON فقط:
-{
-  "readings": [
-    {
-      "questionId": "نفس id من القائمة",
-      "mode": "direct_math | word_problem | theory",
-      "rawVisual": "وصف حرفي دقيق لما تراه في الصورة في موضع هذا السؤال، أو: لا توجد كتابة",
-      "studentAnswer": "ما كتبه الطالب حرفياً — فارغ تماماً إذا لم يكتب",
-      "studentFinalResult": "آخر ناتج كتبه الطالب كما هو — فارغ إذا لم يكتب",
-      "confidence": 0.95,
-      "isEmpty": false
-    }
-  ]
-}`;
+قواعد حدود السؤال:
+- افهم بنية الورقة: سؤال رئيسي ← فرع ← نقطة.
+- لا تعتبر الرقم المنفرد ١ أو ٢ أو ٣ سؤالاً رئيسياً إذا كان داخل فرع أو تحت عنوان فرع.
+- السؤال الرئيسي غالباً يكون معه: س، سؤال، السؤال، مثل: س1، س١، س1/، س1:، س1)، سؤال 1.
+- الفروع قد تكتب: أ، أ/، أ-، أ)، أ:، (أ)، وكذلك ب، ج، د.
+- النقاط داخل الفرع قد تكتب: 1، ١، 1/، ١/، 1-، ١-، 1)، ١).
+- جواب السؤال يجب أن يكون داخل حدوده أو يحمل label واضحاً يربطه به.
+- إذا كتب الطالب جواباً في مكان آخر ومعه label واضح مثل س4/ب، اربطه بالسؤال الصحيح.
+- إذا الجواب بعيد ولا يوجد label واضح، لا تخمّن؛ اجعله unanswered أو needsReview ولا تملأ studentAnswer.
+- عند الشك بين "سؤال فارغ" و"جواب محتمل بعيد" اختر الأمان: unanswered + needsReview، لا تخترع إجابة.
 
 
-    // ═══════════════════════════════════════════════════════════
-    // طبقة التحقق الصارم — صفر تسامح مع السؤال الفارغ
-    // ═══════════════════════════════════════════════════════════
-    const validatedReadings = readings.map((r: any) => {
-      const answer = (r.studentAnswer || '').trim();
-      const finalResult = (r.studentFinalResult || '').trim();
-      const visual = (r.rawVisual || '').trim();
+اختبار أمان قبل إخراج JSON:
+- لكل سؤال، اسأل نفسك: هل أرى كتابة الطالب لهذا السؤال في الصورة؟
+- إذا الجواب لا: studentAnswer=""، status="unanswered"، grade=0.
+- إذا كان studentAnswer يشبه الإجابة النموذجية لكنك لا ترى نفس الكتابة في ورقة الطالب، احذفه واجعله unanswered.
+- إذا كتبت حلاً صحيحاً من عندك داخل studentAnswer، فهذا خطأ؛ احذفه.
+- feedback هو المكان الوحيد للتصحيح وشرح الصواب، وليس studentAnswer.
 
-      // ── الحالة 1: فارغ صريح من النموذج ──
-      if (!answer && !finalResult) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
-      }
-      if (r.isEmpty === true) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
-      }
-
-      // ── الحالة 2: rawVisual يشير صراحةً لعدم وجود كتابة ──
-      const explicitEmpty = /^(لا توجد|لا أرى|لا يوجد|فارغ|لم أجد|لا كتابة|الطالب لم يكتب|لا شيء|nothing|empty|blank)/i.test(visual);
-      if (explicitEmpty) {
-        return { ...r, studentAnswer: '', studentFinalResult: '', isEmpty: true };
-      }
-
-      // ── الحالة 3: rawVisual غير موجود مع وجود إجابة → مشكوك فيه ──
-      if (!visual || visual.length < 5) {
-        return { ...r, isEmpty: false, needsReview: true };
-      }
-
-      // ── الحالة 4: فحص التطبيع — هل studentFinalResult مطابق للإجابة النموذجية؟ ──
-      // إذا نعم بنسبة عالية → نعلّمه للمراجعة (النموذج ربما نسخ بدل القراءة)
-      const sourceQ = flattenedQuestions.find((q: any) => String(q.id) === String(r.questionId));
-      if (sourceQ && finalResult && sourceQ.answer) {
-        const normResult = normalizeMathText(finalResult);
-        const normModel = normalizeMathText(sourceQ.answer);
-        const isSuspiciouslySimilar = normResult.length > 1 && normModel.includes(normResult) && normResult === normModel;
-        if (isSuspiciouslySimilar) {
-          return { ...r, isEmpty: false, needsReview: true, suspectedNormalization: true };
-        }
-      }
-
-      return { ...r, isEmpty: false };
-    });
-
-    if (onProgress) onProgress(50, 100, 'grading');
-
-    // ═══════════════════════════════════════════════════════════
-    // المرحلة الثانية: التصحيح النصي — بدون صورة
-    // الهدف: مقارنة نص بنص فقط، بعيداً عن تأثير الصورة
-    // ═══════════════════════════════════════════════════════════
-
-    // بناء قائمة التصحيح من نتائج القراءة
-    const gradingInput = flattenedQuestions.map((q: any) => {
-      const reading = validatedReadings.find((r: any) => String(r.questionId) === String(q.id));
-      const isEmpty = !reading || reading.isEmpty === true || !(reading.studentAnswer || '').trim();
-      return {
-        id: q.id,
-        questionKey: q.questionKey || q.label,
-        displayLabel: q.displayLabel || q.label,
-        text: q.text,
-        modelAnswer: q.answer,
-        maxGrade: q.grade,
-        type: q.type,
-        studentAnswer: isEmpty ? '' : (reading?.studentAnswer ?? ''),
-        studentFinalResult: isEmpty ? '' : (reading?.studentFinalResult ?? ''),
-        rawVisual: reading?.rawVisual ?? '',
-        readingConfidence: reading?.confidence ?? 0,
-        mode: guessQuestionMode(q, subject),
-        isEmpty
-      };
-    });
-
-    const scoringPrompt = `أنت مصحح امتحانات خبير. لديك إجابات الطلاب كنصوص ومعها صور الورقة — استخدمها عند الحاجة فقط.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- منطق التصحيح — اتبعه بالترتيب
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-▌ إذا isEmpty=true أو studentAnswer فارغ:
-  → grade=0، status="unanswered"، توقف. لا تناقش.
-
-▌ للأسئلة الحسابية المباشرة (mode: direct_math):
-
-  الخطوة 1 — قارن studentFinalResult بالناتج الصحيح في modelAnswer:
-  
-  ✓ إذا تطابقا أو تعادلا رياضياً:
-    → grade = maxGrade كاملة
-    → feedback = "الناتج صحيح ✓"
-    → انتهى، لا حاجة لقراءة الخطوات
-
-  ✗ إذا اختلفا:
-    → افتح الصورة، انظر لخطوات الطالب في منطقة هذا السؤال
-    → قارن خطوة بخطوة مع modelAnswer
-    → إذا الخطأ في الحساب فقط (والطريقة صحيحة) → درجة جزئية (50-70% من maxGrade)
-    → إذا الطريقة خاطئة → grade = 0 أو درجة رمزية صغيرة
-    → feedback يذكر: الناتج الذي كتبه الطالب، الناتج الصحيح، وأين الخطأ
-
-▌ للأسئلة النظرية والنصية (mode: word_problem | theory):
-  → قيّم المعنى والمفهوم، لا التطابق الحرفي
-  → درجة جزئية إذا الفكرة صحيحة جزئياً
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- قواعد صارمة
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ لا تعطِ grade كاملة لناتج خاطئ مهما كانت الخطوات.
-▸ لا تعدّل studentAnswer أو studentFinalResult — انقلهما كما وردا.
-▸ readingConfidence < 0.7 → needsReview=true تلقائياً.
-▸ feedback مختصر وواضح بالعربية.
+قواعد حق الترك:
+- إذا كان السؤال يطلب عدداً محدداً من الفروع فقط، صحح الفروع التي أجاب عنها الطالب ضمن المطلوب.
+- لا تضع حق الترك على فرع أجاب عنه الطالب.
+- الفروع الفارغة الزائدة عن المطلوب اجعلها skipped "حق الترك".
 ${skipInfo}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- بيانات الامتحان
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+بيانات الامتحان:
 المادة: ${subject}
+عدد الأسئلة المطلوب تصحيحها: ${flattenedQuestions.length}
 الدرجة الكلية: ${totalExamGrade}
-عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
+عدد الأسئلة المطلوبة إن وجد: ${requiredQuestionsCount || 'All'}
 
-إجابات الطالب مع الإجابات النموذجية:
-${JSON.stringify(gradingInput, null, 2)}
+الأسئلة والأجوبة النموذجية:
+${JSON.stringify(flattenedQuestions.map((q: any) => ({
+  id: q.id,
+  questionKey: q.questionKey || q.label,
+  displayLabel: q.displayLabel || q.label,
+  text: q.text,
+  modelAnswer: q.answer,
+  maxGrade: q.grade,
+  type: q.type
+})), null, 2)}
 
 أرجع JSON فقط:
 {
@@ -963,18 +750,17 @@ ${JSON.stringify(gradingInput, null, 2)}
       "studentName": "طالب غير معروف",
       "gradings": [
         {
-          "questionId": "نفس id",
-          "questionKey": "نفس questionKey",
-          "displayLabel": "نفس displayLabel",
-          "rawVisual": "من بيانات المدخلات — انقل كما هو",
-          "studentAnswer": "من بيانات المدخلات — لا تعدّل",
+          "questionId": "same id from questions",
+          "questionKey": "same questionKey from questions",
+          "displayLabel": "same displayLabel from questions",
+          "studentAnswer": "what the student wrote only",
           "studentAnswerNormalized": "",
-          "studentFinalResult": "من بيانات المدخلات — لا تعدّل",
+          "studentFinalResult": "",
           "studentFinalResultNormalized": "",
           "grade": 0,
           "maxGrade": 0,
-          "confidence": 0.95,
-          "feedback": "تقييم مختصر بالعربية",
+          "confidence": 0.0,
+          "feedback": "brief Arabic feedback",
           "status": "graded | unanswered | skipped",
           "needsReview": false,
           "isStudentAnswerCopiedFromModelRisk": false,
@@ -986,27 +772,27 @@ ${JSON.stringify(gradingInput, null, 2)}
   ]
 }`;
 
-    const scoringParts: any[] = [
-      // نرسل الصور أيضاً للمرحلة الثانية — تُستخدم فقط عند قراءة الخطوات للأسئلة الخاطئة
-      ...base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } })),
-      { text: scoringPrompt }
-    ];
+    // ✅ نستخدم الصورة المكبّرة لتحسين دقة قراءة الأرقام
+    const parts: any[] = base64ImagesForReading.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+    parts.push({ text: prompt });
 
-    const scoringResponse = await generateWithGeminiFallback({
-      contents: { parts: scoringParts },
+    const response = await generateWithGeminiFallback({
+      contents: { parts },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: `أنت مصحح امتحانات خبير.
-قاعدتك الأساسية: إذا studentAnswer فارغ أو isEmpty=true → grade=0 دون نقاش.
-للأسئلة الحسابية (direct_math):
-  - إذا studentFinalResult يساوي الناتج الصحيح → grade كاملة فوراً.
-  - إذا اختلف → افتح الصورة واقرأ الخطوات لتحديد نوع الخطأ ودرجة جزئية.
-لا تعدّل studentAnswer أو studentFinalResult أبداً — انقلهما كما وردا في المدخلات.`
+        systemInstruction: `أنت معلم خبير في تصحيح أوراق الامتحان لجميع المواد.
+صحح الورقة مباشرة من الصورة كاملة دفعة واحدة.
+studentAnswer هو كتابة مرئية من ورقة الطالب فقط. ممنوع إصلاحه أو استبداله أو ملؤه من الإجابة النموذجية.
+إذا لم ترَ جواباً واضحاً لسؤال محدد، اجعله unanswered ولا تضع له جواباً.
+إذا كان جواب الطالب خاطئاً، اتركه خاطئاً في studentAnswer واشرح الخطأ في feedback فقط.
+الناتج النهائي في الكتابة العربية يكون في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
+في الأسئلة النصية افهم المطلوب والمعطيات. في الأسئلة المباشرة افحص الناتج النهائي أولاً.
+كن محافظاً: عند الشك لا تخمّن ولا تملأ الفراغات.`
       }
     });
 
-    const data = JSON.parse(cleanJson(scoringResponse.text || '{}'));
+    const data = JSON.parse(cleanJson(response.text || '{}'));
 
     if (onProgress) onProgress(100, 100, 'grading');
 
@@ -1017,58 +803,23 @@ ${JSON.stringify(gradingInput, null, 2)}
         const gradingsWithMax = (r.gradings || []).map((g: any) => {
           const sourceQuestion = flattenedQuestions.find(fq => fq.id === g.questionId);
           const maxGrade = Number(g.maxGrade ?? sourceQuestion?.grade ?? 0) || 0;
-
-          // ── الفلتر الصارم: إذا كانت إجابة الطالب فارغة من المرحلة الأولى، grade=0 لا نقاش ──
-          const originalReading = gradingInput.find((gi: any) => String(gi.id) === String(g.questionId));
-          const isConfirmedEmpty = originalReading?.isEmpty === true || !(originalReading?.studentAnswer || '').trim();
-          if (isConfirmedEmpty) {
-            return {
-              questionId: g.questionId || sourceQuestion?.id,
-              questionKey: g.questionKey || sourceQuestion?.questionKey || sourceQuestion?.label,
-              displayLabel: g.displayLabel || sourceQuestion?.displayLabel || sourceQuestion?.label,
-              rawVisual: originalReading?.rawVisual || '',
-              studentAnswer: '',
-              studentAnswerNormalized: '',
-              studentFinalResult: '',
-              studentFinalResultNormalized: '',
-              grade: 0,
-              maxGrade,
-              confidence: originalReading?.readingConfidence ?? 0,
-              feedback: 'لم يكتب الطالب إجابة لهذا السؤال.',
-              status: 'unanswered',
-              needsReview: false,
-              isStudentAnswerCopiedFromModelRisk: false,
-              box: [0, 0, 0, 0],
-              pageIndex: 0
-            };
-          }
-
           const grade = clampGrade(g.grade, maxGrade);
           const copiedRisk = Boolean(g.isStudentAnswerCopiedFromModelRisk || looksLikeCopiedModel(g.studentAnswer, sourceQuestion?.answer));
-          const normalizationRisk = Boolean(originalReading?.suspectedNormalization);
           const audit = buildMathAuditNote(g, sourceQuestion, maxGrade);
-          const feedback = [
-            g.feedback || '',
-            copiedRisk ? 'تنبيه آلي: جواب الطالب يشبه الإجابة النموذجية بشكل مريب ويحتاج مراجعة.' : '',
-            normalizationRisk ? 'تنبيه آلي: الناتج مطابق للإجابة النموذجية تماماً — تحقق يدوياً من الورقة.' : '',
-            audit.note
-          ].filter(Boolean).join(' ');
+          const feedback = (g.feedback || '').trim();
 
           return {
             ...g,
             questionId: g.questionId || sourceQuestion?.id,
             questionKey: g.questionKey || sourceQuestion?.questionKey || sourceQuestion?.label,
             displayLabel: g.displayLabel || sourceQuestion?.displayLabel || sourceQuestion?.label,
-            rawVisual: g.rawVisual || '',
             studentAnswerNormalized: g.studentAnswerNormalized || normalizeMathText(g.studentAnswer || ''),
             studentFinalResultNormalized: g.studentFinalResultNormalized || normalizeMathText(g.studentFinalResult || ''),
             maxGrade,
             grade,
             confidence: typeof g.confidence === 'number' ? g.confidence : undefined,
             isStudentAnswerCopiedFromModelRisk: copiedRisk,
-            // إذا rawVisual يشير لعدم رؤية كتابة، تأكد grade = 0
-            ...(g.rawVisual && /لا أرى|لا يوجد|فارغ|blank|empty/i.test(g.rawVisual) ? { grade: 0, status: 'unanswered' } : {}),
-            needsReview: Boolean(g.needsReview || copiedRisk || normalizationRisk || audit.needsReview || (typeof g.confidence === 'number' && g.confidence < 0.75)),
+            needsReview: Boolean(g.needsReview || copiedRisk || audit.needsReview),
             feedback
           };
         });
@@ -1117,7 +868,7 @@ ${JSON.stringify(gradingInput, null, 2)}
   }
 }
 
-async function compressImage(url: string, maxWidth = 1800, maxHeight = 1800, quality = 0.85): Promise<string> {
+async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
