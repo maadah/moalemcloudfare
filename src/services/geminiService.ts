@@ -465,7 +465,23 @@ function normalizeMathText(value: any): string {
     .replace(/[=＝]/g, '=')
     .replace(/[٫,]/g, '.')
     .replace(/\s+/g, '')
+    // تطبيع الاتجاه: إذا بدأت بالناتج (مثل "٢/٧=") اعكسها
+    // نستخرج الناتج النهائي بغض النظر عن الاتجاه
     .trim();
+}
+
+// استخراج الناتج النهائي من المعادلة بغض النظر عن اتجاه الكتابة
+function extractFinalResult(expr: string): string {
+  if (!expr) return '';
+  const normalized = normalizeMathText(expr);
+  const parts = normalized.split('=');
+  if (parts.length < 2) return normalized;
+  // الناتج إما في أول جزء أو آخر جزء حسب اتجاه الكتابة
+  const first = parts[0].trim();
+  const last = parts[parts.length - 1].trim();
+  // إذا الجزء الأول أقصر → على الأرجح هو الناتج (RTL: النتيجة = المعادلة)
+  // إذا الجزء الأخير أقصر → على الأرجح هو الناتج (LTR: المعادلة = النتيجة)
+  return last.length <= first.length ? last : first.length < last.length ? first : last;
 }
 
 
@@ -828,15 +844,24 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
 عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
 ${skipInfo}
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+تنبيه مهم — اتجاه الكتابة
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+جواب الطالب قد يكون مستخرجاً من اليسار لليمين بينما الإجابة النموذجية من اليمين لليسار.
+عند المقارنة: تجاهل اتجاه الكتابة تماماً — قارن القيم الرياضية فقط.
+مثال: "٢/٣ × ١/٢ × ٦/٧ = ٢/٧" يساوي "٢/٧ = ٤٢ ÷ ٣" رياضياً رغم اختلاف الاتجاه.
+
 إجابات الطالب مع الإجابات النموذجية:
 ${JSON.stringify(gradingInput, null, 2)}
 
-قواعد التصحيح:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+قواعد التصحيح
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▌ isEmpty=true أو studentAnswer فارغ:
   → grade=0، status="unanswered"، feedback="لم يكتب الطالب إجابة."
 
 ▌ حسابي (direct_math):
-  قارن studentFinalResult بالناتج الصحيح في modelAnswer رياضياً.
+  قارن studentFinalResult بالناتج الصحيح في modelAnswer رياضياً (بغض النظر عن الاتجاه).
   تطابقا → grade كاملة.
   اختلفا + الطريقة صحيحة → درجة جزئية (50-70%).
   الطريقة خاطئة → grade = 0.
