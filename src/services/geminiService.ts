@@ -36,7 +36,7 @@ export interface GradingResult {
 // ✅ الموديل الأساسي — يمكن تغييره من Netlify عبر VITE_GEMINI_MODEL
 // عند 503 يتحول تلقائياً لموديل احتياطي أقل ضغطاً
 const GEMINI_MODEL = (import.meta.env?.VITE_GEMINI_MODEL || 'gemini-2.5-flash').trim();
-const GEMINI_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-1.5-flash'];
 
 // ✅ تحميل كل مفاتيح API المتاحة (مفتاحين + localStorage كاحتياط)
 const getApiKeys = (): string[] => {
@@ -82,9 +82,10 @@ const isRetryableError = (error: any): boolean => {
   const status = error?.status || error?.httpStatus;
   const message = String(error?.message || '').toLowerCase();
   return (
-    status === 401 ||   // Unauthorized - مفتاح خاطئ
-    status === 403 ||   // Forbidden - مفتاح محظور
-    status === 429 ||   // Rate limit - تجاوز الحصة
+    status === 401 ||   // Unauthorized
+    status === 403 ||   // Forbidden
+    status === 404 ||   // Model not found / no longer available
+    status === 429 ||   // Rate limit
     status === 503 ||   // Service unavailable
     message.includes('api key') ||
     message.includes('quota') ||
@@ -92,7 +93,9 @@ const isRetryableError = (error: any): boolean => {
     message.includes('permission denied') ||
     message.includes('high demand') ||
     message.includes('unavailable') ||
-    message.includes('model not found')
+    message.includes('model not found') ||
+    message.includes('no longer available') ||
+    message.includes('not found')
   );
 };
 
@@ -193,6 +196,14 @@ async function generateWithGeminiFallback(request: any) {
     throw new GeminiError(
       'مفتاح API غير صالح أو محظور. يرجى التحقق من المفتاح في الإعدادات.',
       'invalid_key'
+    );
+  }
+
+  if (lastStatus === 404 || lastMsg.includes('no longer available') || lastMsg.includes('model not found')) {
+    throw new GeminiError(
+      'الموديل المستخدم غير متاح. جاري التحويل للموديل الاحتياطي تلقائياً — حاول مجدداً.',
+      'server_busy',
+      modelsToTry
     );
   }
 
