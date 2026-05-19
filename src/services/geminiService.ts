@@ -508,6 +508,53 @@ function guessQuestionMode(q: Question, subject: string): 'direct_math' | 'word_
   return 'theory';
 }
 
+// ═══════════════════════════════════════════════════════════
+// دالة اقتصاص الصورة — تقسّم صورة الورقة لشرائح حسب عدد الأسئلة
+// كل شريحة تمثل منطقة سؤال واحد مكبّرة وواضحة
+// ═══════════════════════════════════════════════════════════
+async function cropQuestionRegions(
+  base64Image: string,
+  questionCount: number,
+  overlapRatio: number = 0.15
+): Promise<string[]> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const totalHeight = img.naturalHeight;
+      const totalWidth = img.naturalWidth;
+      const sliceHeight = Math.floor(totalHeight / questionCount);
+      const overlapPx = Math.floor(sliceHeight * overlapRatio);
+      const crops: string[] = [];
+
+      for (let i = 0; i < questionCount; i++) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+
+        // تحديد منطقة الاقتصاص مع تداخل للتأكد من عدم قطع إجابة
+        const yStart = Math.max(0, i * sliceHeight - overlapPx);
+        const yEnd = Math.min(totalHeight, (i + 1) * sliceHeight + overlapPx);
+        const cropH = yEnd - yStart;
+
+        // تكبير الشريحة ×1.5 لوضوح أفضل
+        const scale = 1.5;
+        canvas.width = Math.floor(totalWidth * scale);
+        canvas.height = Math.floor(cropH * scale);
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, yStart, totalWidth, cropH, 0, 0, canvas.width, canvas.height);
+
+        // جودة عالية للشريحة
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        crops.push(dataUrl.split(',')[1]); // base64 فقط
+      }
+      resolve(crops);
+    };
+    img.onerror = () => resolve([]); // fallback: لا اقتصاص
+    img.src = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${base64Image}`;
+  });
+}
+
 export async function gradeStudentPaper(
   imageUrls: string[],
   questions: Question[],
@@ -602,10 +649,39 @@ export async function gradeStudentPaper(
     );
 
     // ═══════════════════════════════════════════════════════════
-    // المرحلة الأولى: القراءة بمساعدة قاموس التنسيق
-    // الإجابة النموذجية = مرجع للرموز والتنسيق فقط، ليس للنسخ
+    // اقتصاص الصورة — كل سؤال يحصل على شريحته المكبّرة
+    // نستخدم الصورة الأولى فقط للاقتصاص (الصفحة الأولى)
+    // إذا فشل الاقتصاص نرجع للصورة الكاملة
     // ═══════════════════════════════════════════════════════════
-    const readingPrompt = `أنت قارئ ورقة امتحان متخصص. مهمتك الوحيدة: نقل ما كتبه الطالب بخط يده من الصورة.
+    const totalQuestions = flattenedQuestions.length;
+    let questionCrops: string[][] = [];
+
+    try {
+      // نقتص كل صورة من صور الورقة
+      const allCrops = await Promise.all(
+        base64ImagesData.map(img => cropQuestionRegions(img, Math.ceil(totalQuestions / base64ImagesData.length)))
+      );
+      // نوزع الشرائح على الأسئلة
+      const flatCrops = allCrops.flat();
+      questionCrops = flattenedQuestions.map((_, i) => {
+        const crop = flatCrops[i];
+        // كل سؤال يحصل على شريحته + الشريحة المجاورة للسياق
+        const neighbors = [
+          flatCrops[i - 1],
+          crop,
+          flatCrops[i + 1]
+        ].filter(Boolean);
+        return neighbors;
+      });
+    } catch {
+      // fallback: أرسل الصورة الكاملة لكل سؤال
+      questionCrops = flattenedQuestions.map(() => base64ImagesData);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // المرحلة الأولى: إرسال كل سؤال مع شريحته الخاصة
+    // ═══════════════════════════════════════════════════════════
+    const readingPromptBase = `أنت قارئ ورقة امتحان متخصص. مهمتك الوحيدة: نقل ما كتبه الطالب بخط يده من الصورة.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  كيف تستخدم الإجابة النموذجية — مهم جداً
@@ -701,15 +777,7 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
 
     if (onProgress) onProgress(10, 100, 'grading');
 
-    const readingParts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    readingParts.push({ text: readingPrompt });
-
-    const readingResponse = await generateWithGeminiFallback({
-      contents: { parts: readingParts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: `أنت قارئ ورقة امتحان متخصص بالخط العربي اليدوي.
+    const readingSystemInstruction = `أنت قارئ ورقة امتحان متخصص بالخط العربي اليدوي.
 مهمتك: نقل ما تراه بخط الطالب من الصورة فقط — لا تحكم، لا تصحح، لا تستنتج.
 
 القاعدة الأولى — السؤال الفارغ:
@@ -727,13 +795,81 @@ formatGuide يُريك فقط كيف تُكتب الرموز (ح، ع، م، ...
 ممنوع نسخ أي قيمة أو رقم أو نتيجة منه.
 
 القاعدة الرابعة — النقل الحرفي:
-الكتابة الخاطئة تُنقل خاطئة. -٤١ تبقى -٤١ حتى لو -٥١ هي الصحيحة.`
+الكتابة الخاطئة تُنقل خاطئة. -٤١ تبقى -٤١ حتى لو -٥١ هي الصحيحة.`;
+
+    // ── إرسال كل سؤال مع شريحته الخاصة — كل طلب يرى منطقة واحدة مكبّرة ──
+    // نقسّم الأسئلة لمجموعات (٤ أسئلة لكل طلب) لتوازن الدقة والسرعة
+    const BATCH_SIZE = 4;
+    const allReadings: any[] = [];
+
+    for (let batchStart = 0; batchStart < flattenedQuestions.length; batchStart += BATCH_SIZE) {
+      const batchQuestions = flattenedQuestions.slice(batchStart, batchStart + BATCH_SIZE);
+      const batchIndices = batchQuestions.map((_: any, i: number) => batchStart + i);
+
+      // جمع الشرائح الخاصة بهذه المجموعة
+      const batchCrops = new Set<string>();
+      batchIndices.forEach((qi: number) => {
+        (questionCrops[qi] || base64ImagesData).forEach((c: string) => batchCrops.add(c));
+      });
+
+      // إذا لا توجد شرائح مقتصّة، استخدم الصورة الكاملة
+      const imagesForBatch = batchCrops.size > 0
+        ? Array.from(batchCrops)
+        : base64ImagesData;
+
+      const batchPrompt = readingPromptBase + `
+
+أسئلة هذه المجموعة فقط — ركّز على منطقتها في الصورة:
+${JSON.stringify(batchQuestions.map((q: any) => ({
+  id: q.id,
+  questionKey: q.questionKey || q.label,
+  displayLabel: q.displayLabel || q.label,
+  text: q.text,
+  type: q.type,
+  mode: guessQuestionMode(q, subject),
+  formatGuide: q.answer
+})), null, 2)}
+
+أرجع JSON فقط لهذه الأسئلة:
+{
+  "readings": [
+    {
+      "questionId": "نفس id",
+      "mode": "direct_math | word_problem | theory",
+      "rawVisual": "وصف حرفي لما تراه في منطقة هذا السؤال",
+      "studentAnswer": "ما كتبه الطالب — فارغ إذا لم يكتب",
+      "studentFinalResult": "آخر ناتج كتبه الطالب — فارغ إذا لم يكتب",
+      "confidence": 0.95,
+      "isEmpty": false
+    }
+  ]
+}`;
+
+      const batchParts: any[] = [
+        ...imagesForBatch.map((data: string) => ({ inlineData: { data, mimeType: "image/jpeg" } })),
+        { text: batchPrompt }
+      ];
+
+      try {
+        const batchResponse = await generateWithGeminiFallback({
+          contents: { parts: batchParts },
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0,
+            systemInstruction: readingSystemInstruction
+          }
+        });
+        const batchData = JSON.parse(cleanJson(batchResponse.text || '{}'));
+        allReadings.push(...(batchData.readings || []));
+      } catch (e) {
+        // إذا فشل طلب مجموعة، أضف فراغات للأسئلة المعنية
+        batchQuestions.forEach((q: any) => {
+          allReadings.push({ questionId: q.id, studentAnswer: '', studentFinalResult: '', isEmpty: true, rawVisual: 'فشل القراءة', confidence: 0, mode: 'theory' });
+        });
       }
-    });
+    }
 
-    const readingData = JSON.parse(cleanJson(readingResponse.text || '{}'));
-    const readings: any[] = readingData.readings || [];
-
+    const readings: any[] = allReadings;
     console.log('[READING PHASE]', JSON.stringify(readings, null, 2));
 
     // ═══════════════════════════════════════════════════════════
