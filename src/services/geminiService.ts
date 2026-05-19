@@ -670,79 +670,14 @@ export async function gradeStudentPaper(
       ? `\n\nمعلومات حق الترك:\n${JSON.stringify(skipCandidates, null, 2)}`
       : '';
 
-    const prompt = `أنت معلم خبير يقيّم ورقة طالب مباشرة من الصورة.
+    // ═══════════════════════════════════════════════════════════
+    // التصحيح — طلب منفصل لكل سؤال
+    // النموذج يركز على سؤال واحد فقط → دقة أعلى في القراءة والتصحيح
+    // ═══════════════════════════════════════════════════════════
+    const makeQuestionPrompt = (q: any, skipInfoText: string) => `أنت معلم خبير. ركّز على هذا السؤال الواحد فقط في الصورة.
 
-المطلوب:
-صحح ورقة الطالب كاملة مرة واحدة اعتماداً على:
-1) صورة ورقة الطالب.
-2) قائمة الأسئلة.
-3) الأجوبة النموذجية.
-4) الدرجات المحددة لكل سؤال.
-
-اجعل التصحيح عاماً ومناسباً لكل المناهج الدراسية، وليس للرياضيات فقط.
-
-القواعد الأساسية — مهمة جداً:
-- الصورة هي المصدر الأساسي والوحيد لجواب الطالب.
-- اقرأ الورقة مباشرة من الصورة، ولا تعتمد على OCR منفصل.
-- لا تصحح سؤالاً سؤالاً في طلبات منفصلة؛ قيّم الورقة كاملة مع فهم مكان كل جواب.
-- لا تنسخ الإجابة النموذجية داخل studentAnswer أبداً.
-- لا تُصلح جواب الطالب داخل studentAnswer أبداً.
-- لا تكتب ما كان يجب أن يكتبه الطالب داخل studentAnswer.
-- studentAnswer يجب أن يكون كتابة مرئية فعلاً في ورقة الطالب، وليست استنتاجاً.
-- إذا لم ترَ كتابة واضحة تخص هذا السؤال تحديداً، اجعل studentAnswer = "" و status = "unanswered" و grade = 0.
-- لا تضع جواباً في studentAnswer لمجرد أن الإجابة النموذجية موجودة أو لأنك تعرف الحل الصحيح.
-- لا تستخدم جواب سؤال قريب أو فرع قريب لتعبئة سؤال فارغ.
-- إذا كنت غير متأكد بنسبة قوية أن هذه الكتابة تخص هذا السؤال، لا تنقلها؛ اجعل studentAnswer = "" و status = "unanswered" و needsReview = true.
-- إذا كان له حق ترك، اجعل status = "skipped" و feedback = "حق الترك".
-- إذا كانت الكتابة موجودة لكنها غير واضحة، استخرج ما تستطيع فقط من الصورة واجعل needsReview = true.
-- لا تخترع جواباً للطالب من السؤال أو من الإجابة النموذجية.
-- لا تنقل جواب سؤال إلى سؤال آخر.
-- حافظ على أرقام الطالب كما تظهر في studentAnswer إن أمكن، مثل ٤٨ وليس 48.
-- يمكن وضع نسخة normalized في studentAnswerNormalized و studentFinalResultNormalized للمقارنة فقط.
-
-طريقة التقييم العامة:
-- افهم السؤال أولاً ثم قارن جواب الطالب بفكرة الإجابة النموذجية.
-- في الأسئلة النظرية: قيّم المعنى والمفاهيم الأساسية، وليس التطابق الحرفي.
-- في الأسئلة العملية أو الرقمية: انظر إلى النتيجة النهائية أولاً إن كانت واضحة.
-- إذا كانت النتيجة النهائية صحيحة، أعط الدرجة المناسبة بدون تحليل طويل.
-- إذا كانت النتيجة النهائية خاطئة، راجع خطوات الطالب وحدد سبب الخطأ من خلال السؤال والإجابة النموذجية.
-- إذا كانت الفكرة صحيحة لكن يوجد خطأ جزئي، أعط درجة جزئية.
-- إذا كان جواب الطالب خارج المطلوب أو لا يجيب عن السؤال، أعطه الدرجة المناسبة لذلك.
-- feedback يكون مختصراً وواضحاً بالعربية، ويذكر سبب الدرجة.
-
-قواعد حدود السؤال:
-- افهم بنية الورقة: سؤال رئيسي ← فرع ← نقطة.
-- لا تعتبر الرقم المنفرد ١ أو ٢ أو ٣ سؤالاً رئيسياً إذا كان داخل فرع أو تحت عنوان فرع.
-- السؤال الرئيسي غالباً يكون معه: س، سؤال، السؤال، مثل: س1، س١، س1/، س1:، س1)، سؤال 1.
-- الفروع قد تكتب: أ، أ/، أ-، أ)، أ:، (أ)، وكذلك ب، ج، د.
-- النقاط داخل الفرع قد تكتب: 1، ١، 1/، ١/، 1-، ١-، 1)، ١).
-- جواب السؤال يجب أن يكون داخل حدوده أو يحمل label واضحاً يربطه به.
-- إذا كتب الطالب جواباً في مكان آخر ومعه label واضح مثل س4/ب، اربطه بالسؤال الصحيح.
-- إذا الجواب بعيد ولا يوجد label واضح، لا تخمّن؛ اجعله unanswered أو needsReview ولا تملأ studentAnswer.
-- عند الشك بين "سؤال فارغ" و"جواب محتمل بعيد" اختر الأمان: unanswered + needsReview، لا تخترع إجابة.
-
-
-اختبار أمان قبل إخراج JSON:
-- لكل سؤال، اسأل نفسك: هل أرى كتابة الطالب لهذا السؤال في الصورة؟
-- إذا الجواب لا: studentAnswer=""، status="unanswered"، grade=0.
-- إذا كان studentAnswer يشبه الإجابة النموذجية لكنك لا ترى نفس الكتابة في ورقة الطالب، احذفه واجعله unanswered.
-- إذا كتبت حلاً صحيحاً من عندك داخل studentAnswer، فهذا خطأ؛ احذفه.
-- feedback هو المكان الوحيد للتصحيح وشرح الصواب، وليس studentAnswer.
-
-قواعد حق الترك:
-- إذا كان السؤال يطلب عدداً محدداً من الفروع فقط، صحح الفروع التي أجاب عنها الطالب ضمن المطلوب.
-- لا تضع حق الترك على فرع أجاب عنه الطالب.
-- الفروع الفارغة الزائدة عن المطلوب اجعلها skipped "حق الترك".
-${skipInfo}
-
-بيانات الامتحان:
-المادة: ${subject}
-عدد الأسئلة المطلوب تصحيحها: ${flattenedQuestions.length}
-الدرجة الكلية: ${totalExamGrade}
-عدد الأسئلة المطلوبة إن وجد: ${requiredQuestionsCount || 'All'}
-
-الأسئلة والأجوبة النموذجية:
-${JSON.stringify(flattenedQuestions.map((q: any) => ({
+السؤال المطلوب:
+${JSON.stringify({
   id: q.id,
   questionKey: q.questionKey || q.label,
   displayLabel: q.displayLabel || q.label,
@@ -750,135 +685,114 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   modelAnswer: q.answer,
   maxGrade: q.grade,
   type: q.type
-})), null, 2)}
+}, null, 2)}
+
+المادة: ${subject}
+${skipInfoText}
+
+خطوات العمل:
+١) ابحث في الصورة عن إجابة هذا السؤال تحديداً (${q.displayLabel || q.label}).
+   - ابحث عن الرقم أو الحرف الذي يمثل هذا السؤال في الورقة.
+   - انظر للمنطقة المقابلة له في الصورة.
+
+٢) إذا لم تجد كتابة واضحة لهذا السؤال:
+   → studentAnswer = ""، status = "unanswered"، grade = 0. توقف.
+
+٣) إذا وجدت كتابة، انقلها حرفياً كما هي:
+   - لا تصحح الأرقام. لا تكمل الحل. فقط انقل ما تراه.
+   - الناتج النهائي = آخر رقم بعد آخر علامة = في المعادلة.
+   - في الكتابة العربية: الناتج في أقصى اليسار أو السطر الأخير.
+   - مثال: ٣ × (-١٧) = -٤١ → studentFinalResult = "-٤١" (وليس -٥١).
+
+٤) بعد نقل الجواب، قارنه بالإجابة النموذجية وأعط الدرجة:
+   - الناتج صحيح → grade كاملة.
+   - الناتج خاطئ → grade = 0 أو جزئية حسب الطريقة.
+   - في الأسئلة النظرية: قيّم المعنى لا التطابق الحرفي.
 
 أرجع JSON فقط:
 {
-  "results": [
-    {
-      "studentName": "طالب غير معروف",
-      "gradings": [
-        {
-          "questionId": "same id from questions",
-          "questionKey": "same questionKey from questions",
-          "displayLabel": "same displayLabel from questions",
-          "studentAnswer": "what the student wrote only",
-          "studentAnswerNormalized": "",
-          "studentFinalResult": "",
-          "studentFinalResultNormalized": "",
-          "grade": 0,
-          "maxGrade": 0,
-          "confidence": 0.0,
-          "feedback": "brief Arabic feedback",
-          "status": "graded | unanswered | skipped",
-          "needsReview": false,
-          "isStudentAnswerCopiedFromModelRisk": false,
-          "box": [0, 0, 0, 0],
-          "pageIndex": 0
-        }
-      ]
-    }
-  ]
+  "questionId": "${q.id}",
+  "questionKey": "${q.questionKey || q.label}",
+  "displayLabel": "${q.displayLabel || q.label}",
+  "studentAnswer": "ما كتبه الطالب — فارغ إذا لم يكتب",
+  "studentAnswerNormalized": "",
+  "studentFinalResult": "آخر ناتج كتبه الطالب — فارغ إذا لم يكتب",
+  "studentFinalResultNormalized": "",
+  "grade": 0,
+  "maxGrade": ${q.grade},
+  "confidence": 0.95,
+  "feedback": "تقييم مختصر بالعربية",
+  "status": "graded | unanswered | skipped",
+  "needsReview": false,
+  "isStudentAnswerCopiedFromModelRisk": false,
+  "box": [0, 0, 0, 0],
+  "pageIndex": 0
 }`;
 
-    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
+    const perQuestionSystemInstruction = `أنت معلم خبير في تصحيح أوراق الامتحان.
+مهمتك: ابحث عن إجابة سؤال واحد محدد في الصورة، انقلها حرفياً، ثم صحّحها.
 
-    const response = await generateWithGeminiFallback({
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: `أنت معلم خبير في تصحيح أوراق الامتحان لجميع المواد.
-صحح الورقة مباشرة من الصورة كاملة دفعة واحدة.
+قواعد صارمة:
+- إذا لم تر كتابة الطالب للسؤال المحدد → studentAnswer="" و status="unanswered" و grade=0.
+- لا تضع جواباً لأنك تعرف الحل — فقط ما تراه في الصورة.
+- الناتج النهائي في الكتابة العربية يكون في أقصى اليسار أو السطر الأخير.
+- اتبع سلسلة = حتى آخرها — لا تأخذ أول رقم تراه.
+- الكتابة الخاطئة تُنقل خاطئة — لا تصحح في studentAnswer.`;
 
-القاعدة الأولى — السؤال الفارغ (الأهم):
-إذا لم تر كتابة الطالب في موضع السؤال بعينك → studentAnswer="" و status="unanswered" و grade=0 بدون استثناء.
-لا تضع جواباً لأنك تعرف الحل الصحيح. لا تضع جواباً لأن الإجابة النموذجية موجودة. فقط ما تراه في الصورة.
+    // إرسال طلب لكل سؤال بشكل متوازٍ (مجموعات لتجنب rate limit)
+    const CONCURRENT = 3; // 3 طلبات في نفس الوقت
+    const allGradingsRaw: any[] = [];
 
-القاعدة الثانية — الناتج النهائي:
-الكتابة العربية من اليمين لليسار — الناتج النهائي يكون في أقصى اليسار أو السطر الأخير.
-مثال: ع × ١٤ = ٧- × ١٧ = ٦٨-  ← الناتج هو ٦٨- وليس ١٤ أو ١٧.
-اتبع سلسلة = من اليمين حتى آخرها — لا تأخذ أول رقم تراه.
+    for (let i = 0; i < flattenedQuestions.length; i += CONCURRENT) {
+      const batch = flattenedQuestions.slice(i, i + CONCURRENT);
+      const batchResults = await Promise.all(
+        batch.map(async (q: any) => {
+          const isSkipCandidate = skipCandidates[q.id];
+          const qSkipInfo = isSkipCandidate
+            ? `حق الترك: هذا السؤال ضمن مجموعة يُطلب الإجابة عن ${isSkipCandidate.requiredCount} منها فقط.`
+            : '';
 
-القاعدة الثالثة — النقل الحرفي:
-studentAnswer كتابة مرئية فعلاً من ورقة الطالب. ممنوع إصلاحه أو ملؤه من الإجابة النموذجية.
-إذا كان جواب الطالب خاطئاً، اتركه خاطئاً واشرح الخطأ في feedback فقط.
-عند الشك لا تخمّن ولا تملأ الفراغات — اجعله unanswered.`
-      }
-    });
+          const qPrompt = makeQuestionPrompt(q, qSkipInfo);
+          const qParts: any[] = [
+            ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
+            { text: qPrompt }
+          ];
 
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-
-    // ═══════════════════════════════════════════════════════════
-    // تحقق ما بعد التصحيح — يفحص الأسئلة التي أعطاها النموذج درجة
-    // ═══════════════════════════════════════════════════════════
-    const allGradingsRaw: any[] = data.results?.[0]?.gradings || data.gradings || [];
-    const gradedWithAnswer = allGradingsRaw.filter((g: any) =>
-      g.studentAnswer && g.studentAnswer.trim() && Number(g.grade) > 0
-    );
-
-    if (gradedWithAnswer.length > 0) {
-      const verifyPrompt = `انظر للصورة وتحقق من هذه الإجابات فقط.
-لكل سؤال: هل تجد كتابة الطالب في الصورة بالفعل؟
-وإذا كان الناتج النهائي المدوّن خاطئاً، صحّحه.
-
-${JSON.stringify(gradedWithAnswer.map((g: any) => ({
-  questionId: g.questionId,
-  claimedAnswer: g.studentAnswer,
-  claimedFinalResult: g.studentFinalResult || ''
-})), null, 2)}
-
-أرجع JSON فقط:
-{
-  "verifications": [
-    {
-      "questionId": "id",
-      "confirmed": true,
-      "correctedFinalResult": ""
-    }
-  ]
-}`;
-
-      try {
-        const verifyParts: any[] = [
-          ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
-          { text: verifyPrompt }
-        ];
-        const verifyResponse = await generateWithGeminiFallback({
-          contents: { parts: verifyParts },
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0,
-            systemInstruction: `أنت مدقق ورقة امتحان. مهمتك فقط: تأكيد أو نفي وجود كتابة الطالب في الصورة.
-لا تصحح. لا تحكم. فقط: هل تجد هذه الكتابة في الصورة؟
-إذا لم تجدها → confirmed: false.
-إذا وجدت الناتج النهائي مختلفاً → صحّح correctedFinalResult فقط.
-الناتج النهائي في الكتابة العربية يكون في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.`
+          try {
+            const qResponse = await generateWithGeminiFallback({
+              contents: { parts: qParts },
+              config: {
+                responseMimeType: "application/json",
+                temperature: 0,
+                systemInstruction: perQuestionSystemInstruction
+              }
+            });
+            const qData = JSON.parse(cleanJson(qResponse.text || '{}'));
+            // تأكد أن questionId صحيح
+            return { ...qData, questionId: q.id };
+          } catch {
+            // إذا فشل طلب سؤال، أرجع unanswered
+            return {
+              questionId: q.id,
+              questionKey: q.questionKey || q.label,
+              displayLabel: q.displayLabel || q.label,
+              studentAnswer: '',
+              studentFinalResult: '',
+              grade: 0,
+              maxGrade: q.grade,
+              confidence: 0,
+              feedback: 'فشل استخراج الإجابة.',
+              status: 'unanswered',
+              needsReview: true
+            };
           }
-        });
-
-        const verifyData = JSON.parse(cleanJson(verifyResponse.text || '{}'));
-        const verifyMap = new Map((verifyData.verifications || []).map((v: any) => [String(v.questionId), v]));
-
-        allGradingsRaw.forEach((g: any) => {
-          const v = verifyMap.get(String(g.questionId));
-          if (!v) return;
-          if (v.confirmed === false) {
-            g.studentAnswer = '';
-            g.studentFinalResult = '';
-            g.grade = 0;
-            g.status = 'unanswered';
-            g.feedback = 'لم يكتب الطالب إجابة لهذا السؤال.';
-          } else if (v.correctedFinalResult && v.correctedFinalResult.trim() &&
-                     v.correctedFinalResult !== g.studentFinalResult) {
-            g.studentFinalResult = v.correctedFinalResult;
-          }
-        });
-      } catch {
-        // إذا فشل التحقق نكمل بالنتائج الأصلية
-      }
+        })
+      );
+      allGradingsRaw.push(...batchResults);
+      if (onProgress) onProgress(Math.min(90, 10 + Math.floor((i + CONCURRENT) / flattenedQuestions.length * 80)), 100, 'grading');
     }
+
+    const data = { results: [{ studentName: 'طالب غير معروف', gradings: allGradingsRaw }] };
 
     if (onProgress) onProgress(100, 100, 'grading');
 
