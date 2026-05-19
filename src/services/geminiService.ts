@@ -788,6 +788,73 @@ feedback مختصر وواضح بالعربية — سبب الدرجة فقط.
     const data = JSON.parse(cleanJson(response.text || '{}'));
     const allGradingsRaw: any[] = data.results?.[0]?.gradings || data.gradings || [];
 
+    // ═══════════════════════════════════════════════════════════
+    // تحقق ما بعد التصحيح — يفحص كل سؤال أعطي له درجة
+    // ويتأكد أن الطالب كتب فيه فعلاً في الصورة
+    // ═══════════════════════════════════════════════════════════
+    const gradedWithAnswer = allGradingsRaw.filter((g: any) =>
+      g.studentAnswer && g.studentAnswer.trim() && g.status !== 'unanswered'
+    );
+
+    if (gradedWithAnswer.length > 0) {
+      const verifyPrompt = `انظر للصورة بدقة وأجب عن هذا السؤال الواحد فقط:
+
+هل تجد كتابة الطالب لكل سؤال من هذه الأسئلة في الصورة؟
+
+${JSON.stringify(gradedWithAnswer.map((g: any) => ({
+  questionId: g.questionId,
+  displayLabel: g.displayLabel,
+  claimedStudentAnswer: g.studentAnswer
+})), null, 2)}
+
+لكل سؤال:
+- confirmed: true إذا رأيت كتابة الطالب هذه في الصورة فعلاً
+- confirmed: false إذا لم تجد كتابة الطالب في الصورة لهذا السؤال
+
+أرجع JSON فقط:
+{
+  "verifications": [
+    { "questionId": "id", "confirmed": true }
+  ]
+}`;
+
+      try {
+        const verifyParts: any[] = [
+          ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
+          { text: verifyPrompt }
+        ];
+        const verifyResponse = await generateWithGeminiFallback({
+          contents: { parts: verifyParts },
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0,
+            systemInstruction: `أنت مدقق ورقة امتحان. مهمتك الوحيدة: تأكيد أو نفي وجود كتابة الطالب في الصورة.
+لا تصحح. لا تحكم على الجواب. فقط: هل تجد هذه الكتابة في الصورة؟
+إذا لم تجد كتابة واضحة للطالب في موضع هذا السؤال → confirmed: false.
+كن صارماً — إذا شككت → confirmed: false.`
+          }
+        });
+
+        const verifyData = JSON.parse(cleanJson(verifyResponse.text || '{}'));
+        const verifyMap = new Map(
+          (verifyData.verifications || []).map((v: any) => [String(v.questionId), v])
+        );
+
+        allGradingsRaw.forEach((g: any) => {
+          const v = verifyMap.get(String(g.questionId));
+          if (v && v.confirmed === false) {
+            g.studentAnswer = '';
+            g.studentFinalResult = '';
+            g.grade = 0;
+            g.status = 'unanswered';
+            g.feedback = 'لم يكتب الطالب إجابة لهذا السؤال.';
+          }
+        });
+      } catch {
+        // إذا فشل التحقق، نكمل بالنتائج الأصلية
+      }
+    }
+
     if (onProgress) onProgress(100, 100, 'grading');
 
     const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
