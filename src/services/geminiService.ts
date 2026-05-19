@@ -641,47 +641,109 @@ export async function gradeStudentPaper(
     // ═══════════════════════════════════════════════════════════
     // تصنيف الأسئلة: حسابية مباشرة / مسائل نصية / نظرية
     // ═══════════════════════════════════════════════════════════
-    const mathQuestions = flattenedQuestions.filter((q: any) => 
+    const mathQuestions = flattenedQuestions.filter((q: any) =>
       guessQuestionMode(q, subject) === 'direct_math'
     );
-    const otherQuestions = flattenedQuestions.filter((q: any) => 
+    const otherQuestions = flattenedQuestions.filter((q: any) =>
       guessQuestionMode(q, subject) !== 'direct_math'
     );
 
-    // ═══════════════════════════════════════════════════════════
-    // اقتصاص الصورة — كل سؤال يحصل على شريحته المكبّرة
-    // نستخدم الصورة الأولى فقط للاقتصاص (الصفحة الأولى)
-    // إذا فشل الاقتصاص نرجع للصورة الكاملة
-    // ═══════════════════════════════════════════════════════════
-    const totalQuestions = flattenedQuestions.length;
-    let questionCrops: string[][] = [];
+    if (onProgress) onProgress(10, 100, 'grading');
 
-    try {
-      // نقتص كل صورة من صور الورقة
-      const allCrops = await Promise.all(
-        base64ImagesData.map(img => cropQuestionRegions(img, Math.ceil(totalQuestions / base64ImagesData.length)))
-      );
-      // نوزع الشرائح على الأسئلة
-      const flatCrops = allCrops.flat();
-      questionCrops = flattenedQuestions.map((_, i) => {
-        const crop = flatCrops[i];
-        // كل سؤال يحصل على شريحته + الشريحة المجاورة للسياق
-        const neighbors = [
-          flatCrops[i - 1],
-          crop,
-          flatCrops[i + 1]
-        ].filter(Boolean);
-        return neighbors;
-      });
-    } catch {
-      // fallback: أرسل الصورة الكاملة لكل سؤال
-      questionCrops = flattenedQuestions.map(() => base64ImagesData);
+    // ═══════════════════════════════════════════════════════════
+    // المرحلة الأولى: القراءة — صورة كاملة + جميع الأسئلة
+    // ═══════════════════════════════════════════════════════════
+    const readingPrompt = `أنت قارئ ورقة امتحان متخصص. مهمتك الوحيدة: نقل ما كتبه الطالب بخط يده من الصورة.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ كيف تستخدم الإجابة النموذجية — مهم جداً
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+الإجابة النموذجية هي "قاموس تنسيق" فقط — تُريك كيف تُكتب الرموز في هذا الامتحان.
+▸ إذا النموذجية فيها (ح) → فالطالب لو كتب شيئاً يشبه (4) بجانب معادلة، اعلم أنه ح وليس 4
+▸ إذا النموذجية فيها (ع) → فالطالب لو كتب شيئاً يشبه (ع أو 3) في سياق فيزياء، اعلم أنه ع
+▸ إذا النموذجية فيها (م²) → حافظ على نفس الرمز إذا رأيته في ورقة الطالب
+⚠️ ممنوع منعاً باتاً: نسخ قيمة أو رقم أو نتيجة من الإجابة النموذجية إلى studentAnswer.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ قاعدة السؤال الفارغ — الأهم على الإطلاق
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+إذا لم تر كتابة الطالب في موضع السؤال:
+  → studentAnswer = "" (فارغ تماماً)
+  → studentFinalResult = ""
+  → isEmpty = true
+  → rawVisual = "لا توجد كتابة في موضع هذا السؤال"
+لا تضع أي نص في studentAnswer إذا لم تره بعينك في الصورة.
+لا تستنتج. لا تكمل. لا تفترض. إذا شككت → فارغ.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ كيف تحدد الناتج النهائي في الكتابة العربية اليدوية
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+الكتابة العربية من اليمين لليسار — الناتج النهائي في أقصى اليسار أو السطر الأخير:
+▸ الناتج النهائي = الرقم الذي يأتي بعد آخر علامة = في المعادلة كاملة
+▸ في سطر واحد: الناتج في أقصى اليسار
+   مثال: ع × ١٤ = ٧- × ١٧ = ٦٨-   ← الناتج هو ٦٨- وليس ١٤ أو ١٧
+▸ في سطرين: الناتج في السطر الثاني أو الأخير
+   مثال: السطر الأول: (١٤ + ٣) = ١٧ × ٢ = ٣٤ - ٦
+          السطر الثاني: = ٦٨-   ← الناتج هو ٦٨-
+▸ لا تأخذ أول رقم تراه — اتبع سلسلة = حتى آخرها
+▸ إذا المعادلة تنتهي بسهم ← ثم رقم → ذلك الرقم هو الناتج
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ قواعد النقل الحرفي
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ الكتابة الخاطئة تُنقل خاطئة — هذا صحيح ومطلوب
+▸ إذا جزء غير واضح: انقل ما تستطيع + [؟] للغامض
+▸ إذا لم تجد الإجابة في موضعها، ابحث في بقية الصفحة عن تسمية واضحة تربطها بالسؤال
+▸ إذا كتابة بدون تسمية واضحة في مكان بعيد → isEmpty=true
+
+أسئلة الامتحان مع قاموس التنسيق:
+${JSON.stringify(flattenedQuestions.map((q: any) => ({
+  id: q.id,
+  questionKey: q.questionKey || q.label,
+  displayLabel: q.displayLabel || q.label,
+  text: q.text,
+  type: q.type,
+  mode: guessQuestionMode(q, subject),
+  formatGuide: q.answer
+})), null, 2)}
+
+أرجع JSON فقط:
+{
+  "readings": [
+    {
+      "questionId": "نفس id من القائمة",
+      "mode": "direct_math | word_problem | theory",
+      "rawVisual": "وصف حرفي دقيق لما تراه في موضع هذا السؤال، أو: لا توجد كتابة",
+      "studentAnswer": "ما كتبه الطالب حرفياً — فارغ تماماً إذا لم يكتب",
+      "studentFinalResult": "آخر ناتج كتبه الطالب كما هو — فارغ إذا لم يكتب",
+      "confidence": 0.95,
+      "isEmpty": false
     }
+  ]
+}`;
 
-    // ═══════════════════════════════════════════════════════════
-    // المرحلة الأولى: إرسال كل سؤال مع شريحته الخاصة
-    // ═══════════════════════════════════════════════════════════
-    const readingPromptBase = `أنت قارئ ورقة امتحان متخصص. مهمتك الوحيدة: نقل ما كتبه الطالب بخط يده من الصورة.
+    const readingParts: any[] = [
+      ...base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } })),
+      { text: readingPrompt }
+    ];
+
+    const readingResponse = await generateWithGeminiFallback({
+      contents: { parts: readingParts },
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0,
+        systemInstruction: `أنت قارئ ورقة امتحان متخصص بالخط العربي اليدوي.
+مهمتك: نقل ما تراه بخط الطالب من الصورة فقط — لا تحكم، لا تصحح، لا تستنتج.
+السؤال الفارغ: إذا لم تر كتابة → studentAnswer="" و isEmpty=true بدون استثناء.
+اتجاه القراءة: الناتج النهائي في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
+قاموس التنسيق: formatGuide للرموز فقط — ممنوع نسخ أي قيمة منه.
+النقل الحرفي: الكتابة الخاطئة تُنقل خاطئة كما هي.`
+      }
+    });
+
+    const readingData = JSON.parse(cleanJson(readingResponse.text || '{}'));
+    const readings: any[] = readingData.readings || [];
+    console.log('[READING PHASE]', JSON.stringify(readings, null, 2));
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  كيف تستخدم الإجابة النموذجية — مهم جداً
@@ -775,102 +837,6 @@ ${JSON.stringify(flattenedQuestions.map((q: any) => ({
   ]
 }`;
 
-    if (onProgress) onProgress(10, 100, 'grading');
-
-    const readingSystemInstruction = `أنت قارئ ورقة امتحان متخصص بالخط العربي اليدوي.
-مهمتك: نقل ما تراه بخط الطالب من الصورة فقط — لا تحكم، لا تصحح، لا تستنتج.
-
-القاعدة الأولى — السؤال الفارغ:
-إذا لم تر كتابة الطالب في موضع السؤال → studentAnswer="" و isEmpty=true بدون استثناء.
-لا تضع أي نص لم تره بعينك في الصورة، حتى لو كنت تعرف الجواب الصحيح.
-
-القاعدة الثانية — اتجاه القراءة العربي:
-الكتابة العربية من اليمين لليسار — الناتج النهائي يكون في أقصى اليسار أو في السطر الأخير.
-اتبع سلسلة علامات = من اليمين حتى تصل لآخرها — ذلك هو الناتج.
-لا تأخذ أول رقم تراه، اتبع المعادلة كاملة حتى نهايتها.
-إذا المعادلة على سطرين: الناتج في بداية السطر الثاني (أقصى اليسار).
-
-القاعدة الثالثة — قاموس التنسيق:
-formatGuide يُريك فقط كيف تُكتب الرموز (ح، ع، م، ...).
-ممنوع نسخ أي قيمة أو رقم أو نتيجة منه.
-
-القاعدة الرابعة — النقل الحرفي:
-الكتابة الخاطئة تُنقل خاطئة. -٤١ تبقى -٤١ حتى لو -٥١ هي الصحيحة.`;
-
-    // ── إرسال كل سؤال مع شريحته الخاصة — كل طلب يرى منطقة واحدة مكبّرة ──
-    // نقسّم الأسئلة لمجموعات (٤ أسئلة لكل طلب) لتوازن الدقة والسرعة
-    const BATCH_SIZE = 4;
-    const allReadings: any[] = [];
-
-    for (let batchStart = 0; batchStart < flattenedQuestions.length; batchStart += BATCH_SIZE) {
-      const batchQuestions = flattenedQuestions.slice(batchStart, batchStart + BATCH_SIZE);
-      const batchIndices = batchQuestions.map((_: any, i: number) => batchStart + i);
-
-      // جمع الشرائح الخاصة بهذه المجموعة
-      const batchCrops = new Set<string>();
-      batchIndices.forEach((qi: number) => {
-        (questionCrops[qi] || base64ImagesData).forEach((c: string) => batchCrops.add(c));
-      });
-
-      // إذا لا توجد شرائح مقتصّة، استخدم الصورة الكاملة
-      const imagesForBatch = batchCrops.size > 0
-        ? Array.from(batchCrops)
-        : base64ImagesData;
-
-      const batchPrompt = readingPromptBase + `
-
-أسئلة هذه المجموعة فقط — ركّز على منطقتها في الصورة:
-${JSON.stringify(batchQuestions.map((q: any) => ({
-  id: q.id,
-  questionKey: q.questionKey || q.label,
-  displayLabel: q.displayLabel || q.label,
-  text: q.text,
-  type: q.type,
-  mode: guessQuestionMode(q, subject),
-  formatGuide: q.answer
-})), null, 2)}
-
-أرجع JSON فقط لهذه الأسئلة:
-{
-  "readings": [
-    {
-      "questionId": "نفس id",
-      "mode": "direct_math | word_problem | theory",
-      "rawVisual": "وصف حرفي لما تراه في منطقة هذا السؤال",
-      "studentAnswer": "ما كتبه الطالب — فارغ إذا لم يكتب",
-      "studentFinalResult": "آخر ناتج كتبه الطالب — فارغ إذا لم يكتب",
-      "confidence": 0.95,
-      "isEmpty": false
-    }
-  ]
-}`;
-
-      const batchParts: any[] = [
-        ...imagesForBatch.map((data: string) => ({ inlineData: { data, mimeType: "image/jpeg" } })),
-        { text: batchPrompt }
-      ];
-
-      try {
-        const batchResponse = await generateWithGeminiFallback({
-          contents: { parts: batchParts },
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0,
-            systemInstruction: readingSystemInstruction
-          }
-        });
-        const batchData = JSON.parse(cleanJson(batchResponse.text || '{}'));
-        allReadings.push(...(batchData.readings || []));
-      } catch (e) {
-        // إذا فشل طلب مجموعة، أضف فراغات للأسئلة المعنية
-        batchQuestions.forEach((q: any) => {
-          allReadings.push({ questionId: q.id, studentAnswer: '', studentFinalResult: '', isEmpty: true, rawVisual: 'فشل القراءة', confidence: 0, mode: 'theory' });
-        });
-      }
-    }
-
-    const readings: any[] = allReadings;
-    console.log('[READING PHASE]', JSON.stringify(readings, null, 2));
 
     // ═══════════════════════════════════════════════════════════
     // طبقة التحقق الصارم — صفر تسامح مع السؤال الفارغ
