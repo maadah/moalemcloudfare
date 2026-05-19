@@ -670,160 +670,131 @@ export async function gradeStudentPaper(
       ? `\n\nمعلومات حق الترك:\n${JSON.stringify(skipCandidates, null, 2)}`
       : '';
 
-    // ═══════════════════════════════════════════════════════════
-    // المرحلة الأولى: تحديد حدود كل سؤال في الصورة
-    // النموذج يحدد أين تبدأ وتنتهي إجابة كل سؤال (نسب مئوية)
-    // ═══════════════════════════════════════════════════════════
-    const boundaryPrompt = `انظر لصورة ورقة الطالب كاملة من الأعلى للأسفل وحدد أين تبدأ وتنتهي إجابة كل سؤال.
+    if (onProgress) onProgress(10, 100, 'grading');
 
-الأسئلة بالترتيب:
-${JSON.stringify(flattenedQuestions.map((q: any, i: number) => ({
+    // ═══════════════════════════════════════════════════════════
+    // الطلب الأول: قراءة الورقة + ربط كل إجابة بسؤالها
+    // النموذج يجزّئ الكتابة ويربطها بالأسئلة في خطوة واحدة
+    // ═══════════════════════════════════════════════════════════
+    const readAndMapPrompt = `أنت قارئ ورقة امتحان متخصص. انظر للصورة وافعل شيئين:
+
+١) جزّئ كل الكتابة الموجودة في الورقة إلى أجزاء منفصلة.
+٢) اربط كل جزء بالسؤال الذي يخصه من القائمة أدناه.
+
+الأسئلة:
+${JSON.stringify(flattenedQuestions.map((q: any) => ({
   id: q.id,
-  order: i + 1,
   displayLabel: q.displayLabel || q.label,
-  questionText: q.text.substring(0, 60)
+  text: q.text,
+  modelAnswerFormat: q.answer
 })), null, 2)}
 
-تعليمات مهمة:
-- ابحث في كامل الصورة — الطالب قد يكتب في أي مكان: الهامش، نهاية الورقة، بين الأسئلة.
-- الإجابة قد تمتد على أكثر من سطر — احسب كل الكتابة المرتبطة بالسؤال.
-- حدد نسبة البداية والنهاية من ارتفاع الصورة الكلي (0=أعلى، 100=أسفل).
-- أضف هامش 3% أعلى و3% أسفل لتجنب القطع.
-- إذا كانت الإجابة في منطقة غير متوقعة (هامش، نهاية الصفحة، مكان بعيد) — أدرجها.
-- إذا لم تجد أي كتابة للسؤال في أي مكان في الصورة → start: -1, end: -1.
+قواعد الربط:
+- ابحث عن أرقام الأسئلة والفروع في الصورة (مثل: س١، ١/، أ-، ١)، أ:، وأي صيغة مشابهة).
+- الكتابة المجاورة لرقم السؤال أو الفرع هي إجابته.
+- إذا لم تجد ربطاً واضحاً → اتركها بدون questionId.
+- الإجابة قد تمتد على أكثر من سطر.
+- لا تقرأ المحتوى للتصحيح — فقط اقرأه وانقله كما هو.
+- إذا لم تجد أي كتابة لسؤال → isEmpty: true.
+
+استخدم modelAnswerFormat فقط لفهم نوع وتنسيق الإجابة المتوقعة (معادلة؟ نص؟ رقم؟).
+لا تنسخ قيم modelAnswerFormat — فقط استخدمه لفهم التنسيق.
 
 أرجع JSON فقط:
 {
-  "boundaries": [
-    { "questionId": "id", "start": 10, "end": 25 }
+  "segments": [
+    {
+      "questionId": "نفس id من القائمة أو null إذا غير محدد",
+      "rawText": "النص كما هو في الصورة حرفياً",
+      "finalResult": "آخر ناتج أو قيمة في النص — فارغ إذا لا يوجد",
+      "isEmpty": false
+    }
   ]
 }`;
 
-    let questionBoundaries: Map<string, { start: number; end: number }> = new Map();
+    const readParts: any[] = [
+      ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
+      { text: readAndMapPrompt }
+    ];
 
+    let segments: any[] = [];
     try {
-      const boundaryParts: any[] = [
-        ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
-        { text: boundaryPrompt }
-      ];
-      const boundaryResponse = await generateWithGeminiFallback({
-        contents: { parts: boundaryParts },
+      const readResponse = await generateWithGeminiFallback({
+        contents: { parts: readParts },
         config: {
           responseMimeType: "application/json",
           temperature: 0,
-          systemInstruction: `أنت محدد مناطق في صورة ورقة امتحان.
-مهمتك: تحديد النسبة المئوية لبداية ونهاية إجابة كل سؤال في الصورة.
-ابحث في كامل الصورة — الطالب قد يكتب في أي مكان بما فيها الهامش ونهاية الصفحة والمناطق البعيدة.
-لا تقرأ المحتوى. لا تصحح. فقط حدد الموضع الرأسي.
-إذا الإجابة في مكان غير متوقع → أدرجها بموضعها الفعلي.
-إذا لم تجد أي كتابة للسؤال → start: -1, end: -1.`
+          systemInstruction: `أنت قارئ ورقة امتحان متخصص. مهمتك: قراءة كل الكتابة في الصورة وربط كل جزء بسؤاله.
+لا تصحح. لا تحكم. لا تكمل. فقط اقرأ وارتبط.
+الناتج النهائي في الكتابة العربية = آخر رقم بعد آخر = (في أقصى اليسار أو السطر الأخير).
+انقل الناتج كما هو حتى لو كان خاطئاً رياضياً.
+استخدم modelAnswerFormat لفهم التنسيق فقط — لا تنسخ منه.`
         }
       });
-      const boundaryData = JSON.parse(cleanJson(boundaryResponse.text || '{}'));
-      (boundaryData.boundaries || []).forEach((b: any) => {
-        if (b.start >= 0 && b.end > b.start) {
-          questionBoundaries.set(String(b.questionId), {
-            start: Math.max(0, b.start - 3),
-            end: Math.min(100, b.end + 3)
-          });
-        }
-      });
-
-      // الأسئلة التي لم تُحدَّد حدودها → نستخدم الصورة كاملة لها
-      // هذا يضمن أن كل سؤال يحصل على فرصة الرؤية
-      flattenedQuestions.forEach((q: any) => {
-        if (!questionBoundaries.has(String(q.id))) {
-          questionBoundaries.set(String(q.id), { start: 0, end: 100 });
-        }
-      });
+      const readData = JSON.parse(cleanJson(readResponse.text || '{}'));
+      segments = readData.segments || [];
     } catch {
-      // إذا فشل تحديد الحدود، نكمل بدون اقتصاص
+      segments = [];
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // دالة اقتصاص الصورة حسب النسب المئوية
-    // ═══════════════════════════════════════════════════════════
-    const cropImageByPercent = async (base64: string, startPct: number, endPct: number): Promise<string> => {
-      return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d')!;
-            const yStart = Math.floor(img.naturalHeight * startPct / 100);
-            const yEnd = Math.floor(img.naturalHeight * endPct / 100);
-            const cropH = Math.max(1, yEnd - yStart);
-            // تكبير ×2 لوضوح أفضل
-            canvas.width = Math.floor(img.naturalWidth * 2);
-            canvas.height = Math.floor(cropH * 2);
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(img, 0, yStart, img.naturalWidth, cropH, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/jpeg', 0.95).split(',')[1]);
-          } catch {
-            resolve(base64);
-          }
-        };
-        img.onerror = () => resolve(base64);
-        img.src = `data:image/jpeg;base64,${base64}`;
-      });
-    };
+    if (onProgress) onProgress(45, 100, 'grading');
 
-    if (onProgress) onProgress(30, 100, 'grading');
+    // بناء خريطة questionId → segment
+    const segmentMap = new Map<string, any>();
+    segments.forEach((s: any) => {
+      if (s.questionId) segmentMap.set(String(s.questionId), s);
+    });
 
     // ═══════════════════════════════════════════════════════════
-    // المرحلة الثانية: التصحيح
-    // نرسل الصورة الكاملة + صور مقتصّة لكل سؤال له حدود
+    // الطلب الثاني: التصحيح النصي — بدون صورة
+    // مقارنة نص الطالب بالإجابة النموذجية
     // ═══════════════════════════════════════════════════════════
-    const gradingPrompt = `أنت معلم خبير يصحح ورقة امتحان من الصورة.
+    const gradingInput = flattenedQuestions.map((q: any) => {
+      const seg = segmentMap.get(String(q.id));
+      const isEmpty = !seg || seg.isEmpty === true || !(seg.rawText || '').trim();
+      return {
+        id: q.id,
+        questionKey: q.questionKey || q.label,
+        displayLabel: q.displayLabel || q.label,
+        text: q.text,
+        modelAnswer: q.answer,
+        maxGrade: q.grade,
+        type: q.type,
+        studentAnswer: isEmpty ? '' : (seg?.rawText || ''),
+        studentFinalResult: isEmpty ? '' : (seg?.finalResult || ''),
+        isEmpty
+      };
+    });
 
-المطلوب: صحح جميع هذه الأسئلة:
-${JSON.stringify(flattenedQuestions.map((q: any) => ({
-  id: q.id,
-  questionKey: q.questionKey || q.label,
-  displayLabel: q.displayLabel || q.label,
-  text: q.text,
-  modelAnswer: q.answer,
-  maxGrade: q.grade,
-  type: q.type
-})), null, 2)}
+    const scoringPrompt = `أنت مصحح امتحانات خبير. لديك إجابات الطلاب كنصوص — قارنها بالإجابات النموذجية وأعط الدرجات.
 
+${skipInfo}
 المادة: ${subject}
 الدرجة الكلية: ${totalExamGrade}
 عدد الأسئلة المطلوبة: ${requiredQuestionsCount || 'الكل'}
-${skipInfo}
 
-${questionBoundaries.size > 0 ? `
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-تعليمات الصور المقتصّة
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-بعد الصورة الكاملة، ستجد صوراً مقتصّة مع تسمية [منطقة السؤال X].
-استخدم الصورة المقتصّة للسؤال المسمى لقراءة إجابته بدقة.
-الصورة المقتصّة تحتوي إجابة الطالب لذلك السؤال تحديداً.
-` : ''}
+إجابات الطالب مع الإجابات النموذجية:
+${JSON.stringify(gradingInput, null, 2)}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-قواعد قراءة جواب الطالب
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- الصورة هي المصدر الوحيد. لا تخترع. لا تكمل.
-- إذا لم تر كتابة واضحة للسؤال → studentAnswer="" و status="unanswered" و grade=0.
-- لا تنسخ الإجابة النموذجية في studentAnswer أبداً.
-- لا تنقل جواب سؤال لسؤال آخر.
-- عند الشك → unanswered، لا تخمّن.
+قواعد التصحيح:
+▌ إذا isEmpty=true أو studentAnswer فارغ:
+  → grade=0، status="unanswered"، feedback="لم يكتب الطالب إجابة."
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-قاعدة الناتج النهائي
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ انقل الناتج كما كتبه الطالب — حتى لو كان خاطئاً. لا تصحح الأرقام.
-الناتج = آخر رقم بعد آخر = في المعادلة (أقصى اليسار أو السطر الأخير).
+▌ للأسئلة الحسابية:
+  - قارن studentFinalResult بالناتج الصحيح في modelAnswer رياضياً.
+  - تطابقا → grade كاملة.
+  - اختلفا → انظر studentAnswer، إذا الطريقة صحيحة → درجة جزئية (50-70%).
+  - الطريقة خاطئة → grade = 0.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-قواعد التصحيح
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-حسابي: الناتج صحيح → grade كاملة. خاطئ → 0 أو جزئية.
-نصي/مسألة: قيّم المعطيات والطريقة والفهم.
-نظري: قيّم المفهوم والمعنى.
-feedback مختصر بالعربية.
+▌ للمسائل النصية:
+  - قيّم هل الطالب فهم المعطيات واستخدم الطريقة الصحيحة.
+  - الفكرة صحيحة جزئياً → درجة جزئية.
+
+▌ للأسئلة النظرية:
+  - قيّم المفهوم والمعنى، لا التطابق الحرفي.
+
+- لا تعدّل studentAnswer أو studentFinalResult.
+- feedback مختصر بالعربية — سبب الدرجة فقط.
 
 أرجع JSON فقط:
 {
@@ -833,9 +804,9 @@ feedback مختصر بالعربية.
       "questionId": "نفس id",
       "questionKey": "نفس questionKey",
       "displayLabel": "نفس displayLabel",
-      "studentAnswer": "ما كتبه الطالب — فارغ إذا لم يكتب",
+      "studentAnswer": "من gradingInput — لا تعدّل",
       "studentAnswerNormalized": "",
-      "studentFinalResult": "الناتج كما كتبه الطالب — فارغ إذا لم يكتب",
+      "studentFinalResult": "من gradingInput — لا تعدّل",
       "studentFinalResultNormalized": "",
       "grade": 0,
       "maxGrade": 0,
@@ -850,111 +821,21 @@ feedback مختصر بالعربية.
   }]
 }`;
 
-    // بناء أجزاء الطلب: صورة كاملة + صور مقتصّة للأسئلة
-    const gradingParts: any[] = [
-      ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } }))
-    ];
-
-    if (questionBoundaries.size > 0) {
-      gradingParts.push({ text: '[الصورة الكاملة أعلاه. أدناه صور مقتصّة لكل سؤال:]' });
-      for (const q of flattenedQuestions) {
-        const boundary = questionBoundaries.get(String(q.id));
-        if (boundary && base64ImagesData.length > 0) {
-          try {
-            const cropped = await cropImageByPercent(base64ImagesData[0], boundary.start, boundary.end);
-            gradingParts.push({ text: `[منطقة السؤال ${q.displayLabel || q.label}:]` });
-            gradingParts.push({ inlineData: { data: cropped, mimeType: "image/jpeg" } });
-          } catch { /* تجاهل */ }
-        }
-      }
-    }
-
-    gradingParts.push({ text: gradingPrompt });
-
     const response = await generateWithGeminiFallback({
-      contents: { parts: gradingParts },
+      contents: { parts: [{ text: scoringPrompt }] },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: `أنت معلم خبير في تصحيح أوراق الامتحان.
-إذا وُجدت صور مقتصّة مع تسميات [منطقة السؤال X]، استخدمها للتركيز على إجابة ذلك السؤال.
-القاعدة الأولى: إذا لم تر كتابة الطالب → studentAnswer="" و grade=0 و status="unanswered".
-القاعدة الثانية: انقل الناتج كما كتبه الطالب حتى لو خاطئ — لا تصحح الأرقام.
-القاعدة الثالثة: الناتج في أقصى اليسار أو السطر الأخير — اتبع سلسلة = حتى نهايتها.
-القاعدة الرابعة: للمسائل النصية — قيّم الطريقة والفهم، لا التطابق الحرفي.
-لا تنسخ من الإجابة النموذجية. عند الشك → unanswered.`
+        systemInstruction: `أنت مصحح امتحانات خبير. تعمل على نصوص فقط — لا صور.
+إذا studentAnswer فارغ أو isEmpty=true → grade=0 و status="unanswered" بدون نقاش.
+للحسابي: قارن studentFinalResult بالناتج الصحيح رياضياً — إذا تطابقا grade كاملة، إذا لا انظر الطريقة.
+لا تعدّل studentAnswer أو studentFinalResult أبداً.
+feedback مختصر بالعربية فقط.`
       }
     });
 
     const data = JSON.parse(cleanJson(response.text || '{}'));
     const allGradingsRaw: any[] = data.results?.[0]?.gradings || data.gradings || [];
-
-    // ═══════════════════════════════════════════════════════════
-    // تحقق ما بعد التصحيح — يفحص كل سؤال أعطي له درجة
-    // ويتأكد أن الطالب كتب فيه فعلاً في الصورة
-    // ═══════════════════════════════════════════════════════════
-    const gradedWithAnswer = allGradingsRaw.filter((g: any) =>
-      g.studentAnswer && g.studentAnswer.trim() && g.status !== 'unanswered'
-    );
-
-    if (gradedWithAnswer.length > 0) {
-      const verifyPrompt = `انظر للصورة بدقة وأجب عن هذا السؤال الواحد فقط:
-
-هل تجد كتابة الطالب لكل سؤال من هذه الأسئلة في الصورة؟
-
-${JSON.stringify(gradedWithAnswer.map((g: any) => ({
-  questionId: g.questionId,
-  displayLabel: g.displayLabel,
-  claimedStudentAnswer: g.studentAnswer
-})), null, 2)}
-
-لكل سؤال:
-- confirmed: true إذا رأيت كتابة الطالب هذه في الصورة فعلاً
-- confirmed: false إذا لم تجد كتابة الطالب في الصورة لهذا السؤال
-
-أرجع JSON فقط:
-{
-  "verifications": [
-    { "questionId": "id", "confirmed": true }
-  ]
-}`;
-
-      try {
-        const verifyParts: any[] = [
-          ...base64ImagesData.map((d: string) => ({ inlineData: { data: d, mimeType: "image/jpeg" } })),
-          { text: verifyPrompt }
-        ];
-        const verifyResponse = await generateWithGeminiFallback({
-          contents: { parts: verifyParts },
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0,
-            systemInstruction: `أنت مدقق ورقة امتحان. مهمتك الوحيدة: تأكيد أو نفي وجود كتابة الطالب في الصورة.
-لا تصحح. لا تحكم على الجواب. فقط: هل تجد هذه الكتابة في الصورة؟
-إذا لم تجد كتابة واضحة للطالب في موضع هذا السؤال → confirmed: false.
-كن صارماً — إذا شككت → confirmed: false.`
-          }
-        });
-
-        const verifyData = JSON.parse(cleanJson(verifyResponse.text || '{}'));
-        const verifyMap = new Map(
-          (verifyData.verifications || []).map((v: any) => [String(v.questionId), v])
-        );
-
-        allGradingsRaw.forEach((g: any) => {
-          const v = verifyMap.get(String(g.questionId));
-          if (v && v.confirmed === false) {
-            g.studentAnswer = '';
-            g.studentFinalResult = '';
-            g.grade = 0;
-            g.status = 'unanswered';
-            g.feedback = 'لم يكتب الطالب إجابة لهذا السؤال.';
-          }
-        });
-      } catch {
-        // إذا فشل التحقق، نكمل بالنتائج الأصلية
-      }
-    }
 
     if (onProgress) onProgress(100, 100, 'grading');
 
