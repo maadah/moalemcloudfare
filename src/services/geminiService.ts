@@ -192,7 +192,9 @@ export async function gradeStudentPaper(
         const combinedText = parentText ? `${parentText} - ${q.text}` : q.text;
         
         if (!q.subQuestions || q.subQuestions.length === 0) {
-          flattenedQuestions.push({ id: q.id, label: fullPath, text: combinedText, answer: q.answer, grade: q.grade, type: q.type });
+          const entry: any = { id: q.id, label: fullPath, text: combinedText, grade: q.grade, type: q.type };
+          if ((q as any).gradingCriteria && (q as any).gradingCriteria.trim()) entry.gradingCriteria = (q as any).gradingCriteria;
+          flattenedQuestions.push(entry);
         } else {
           flatten(q.subQuestions, combinedText, fullPath);
         }
@@ -204,81 +206,56 @@ export async function gradeStudentPaper(
     
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
 
-    const prompt = `You are grading a student exam paper. Follow this exact procedure for EVERY question.
+    const prompt = `You are an expert Iraqi teacher grading student exam papers. You do NOT have a model answer — determine the correct answer yourself from the question, then evaluate the student.
 
     Subject: ${subject}.
-    Questions: ${JSON.stringify(flattenedQuestions)}.
+    Questions (no model answer provided — use your own knowledge): ${JSON.stringify(flattenedQuestions)}.
     Total Exam Max Grade: ${totalExamGrade}.
     Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
-    ════════════════════════════════════════
-    STEP 1 — CLASSIFY THE QUESTION TYPE
-    ════════════════════════════════════════
-    Before grading, classify each question into one of two types:
+    STEP 1 — SOLVE THE QUESTION YOURSELF
+    Before looking at the student answer, read the question and find the correct answer using your knowledge.
+    - Math: calculate step by step and verify (85 / 5 = 17, verify: 17 * 5 = 85).
+    - Factual: recall the correct fact or concept.
+    - Essay: identify the key required points.
+    - If gradingCriteria is provided, use it as the teacher rubric.
 
-    TYPE A — DIRECT ANSWER (رقم أو كلمة مباشرة):
-    A question where the expected answer is a single number, value, word, or short phrase.
-    Examples: "احسب ناتج 85÷5", "ما عاصمة العراق؟", true/false, multiple choice, fill-in-the-blank with one word.
-    → Recognition: the model answer (field "answer") is a short value (number or 1-3 words).
+    STEP 2 — CLASSIFY THE QUESTION TYPE
+    TYPE A (Direct Answer): single number, value, word, true/false, MCQ, or short fill-in-blank.
+    TYPE B (Problem with Working): requires steps, reasoning, or extended explanation.
 
-    TYPE B — PROBLEM WITH WORKING (مسألة بها شرح وخطوات):
-    A question requiring the student to show reasoning, steps, or explanation to reach an answer.
-    Examples: word problems, geometry proofs, multi-step calculations with shown work, essay-style.
-    → Recognition: the model answer contains steps, explanation, or multiple lines.
-
-    ════════════════════════════════════════
-    STEP 2 — LOCATE THE STUDENT'S ANSWER
-    ════════════════════════════════════════
-    Find the student's handwritten response area on the paper for this question.
-    - Scan the area carefully.
+    STEP 3 — LOCATE THE STUDENT ANSWER
+    Find the student handwritten response on the paper.
     - If blank: studentAnswer = "لا توجد إجابة", grade = 0.
-    - BOXED or CIRCLED content = the student's final definitive answer, prioritize it.
-    - Crossed-out text = ignore it, use only what is NOT crossed out.
+    - BOXED or CIRCLED = student final answer, prioritize it.
+    - Crossed-out text = ignore.
 
-    ════════════════════════════════════════
-    STEP 3 — GRADE BASED ON QUESTION TYPE
-    ════════════════════════════════════════
-
-    ── FOR TYPE A (Direct Answer) ──
-    • DO NOT attempt to read or transcribe the student's handwriting literally.
-    • Instead: COMPARE visually — does what the student wrote MATCH the model answer value?
-    • Re-calculate the model answer yourself to verify it is correct first.
-    • MATCH = full grade. NO MATCH = 0 (or partial if partially correct, e.g. correct number wrong unit).
-    • For true/false and multiple choice: simple match check only.
-    • studentAnswer field: write the value you identified the student wrote (just the final number/word).
-    • DO NOT deduct for messy handwriting if the value is correct.
-
-    ── FOR TYPE B (Problem with Working) ──
-    • Read the question text carefully to understand what is being asked.
-    • Examine the student's FULL working/steps shown on the paper.
-    • Evaluate:
-      - Are the steps logical and correct?
-      - Is the method appropriate for the question?
-      - Is the final answer correct?
-    • GRADING SCALE for Type B:
-      - All steps correct + correct final answer → full grade.
-      - Correct method/steps but arithmetic error in final answer only → deduct 1 mark maximum.
-      - Partial understanding shown → award partial grade proportionally.
-      - Wrong method entirely → 0 or minimal marks.
-    • studentAnswer field: summarize the student's approach and final answer as seen.
+    STEP 4 — GRADE
+    TYPE A: Compare student answer to YOUR correct answer from Step 1.
+    - Match = full grade. Wrong = 0. Partial = partial grade.
+    - studentAnswer field: the number or word the student wrote.
     ${isMath ? `
-    ── MATH ARITHMETIC INTEGRITY (applies to both types) ──
-    • YOU MUST verify all arithmetic yourself. 85÷5=17 NOT 18. Always double-check.
-    • PEMDAS/BODMAS: × and ÷ before + and −. This is non-negotiable.
-    • If student's final answer matches the correct mathematical result → correct.
+    MATH TYPE A RULES: PEMDAS/BODMAS strictly. Always verify your own arithmetic before comparing.
+    ` : ``}
+
+    TYPE B: Evaluate method, steps, and final answer.
+    - Correct method + steps + answer = full grade.
+    - Correct method + steps but arithmetic error only = deduct 1 mark max.
+    - Partial understanding = proportional partial grade.
+    - Wrong method = 0 or minimal.
+    - If gradingCriteria provided: check each criterion and award marks accordingly.
+    - studentAnswer field: brief summary of approach and final answer.
+    ${isMath ? `
+    MATH TYPE B RULES: PEMDAS/BODMAS strictly. Verify all arithmetic yourself.
     ` : `
-    ── NON-MATH GRADING STANDARD ──  
-    • Focus on factual accuracy and key concepts.
-    • Award partial credit for partially correct answers.
+    NON-MATH TYPE B: Check factual accuracy, key concepts, logical structure. Award partial credit proportionally.
     `}
 
-    ════════════════════════════════════════
-    STEP 4 — OUTPUT
-    ════════════════════════════════════════
-    JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.
-    - feedback: Arabic only (العربية الفصحى), constructive and educational tone.
-    - box: [ymin, xmin, ymax, xmax] coordinates of the student's answer area on the page.
-    - pageIndex: 0-based index of the image page containing this answer.`;`;
+    STEP 5 — OUTPUT
+    JSON: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.
+    - feedback: Arabic only (العربية الفصحى), constructive and encouraging for Iraqi students.
+    - box: [ymin, xmin, ymax, xmax] coordinates of the student answer region.
+    - pageIndex: 0-based image index.`;
 
     const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
@@ -290,8 +267,8 @@ export async function gradeStudentPaper(
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath ?
-          "أنت مصحح رياضيات خبير. لكل سؤال: أولاً صنّف نوعه — (أ) إجابة مباشرة (رقم أو قيمة واحدة): لا تحاول قراءة الخط الحرفي، فقط قارن بصرياً هل ما كتبه الطالب يطابق الجواب النموذجي أم لا، صح = الدرجة كاملة، خطأ = صفر أو جزئي. (ب) مسألة بها خطوات وشرح: افهم المطلوب من السؤال أولاً، ثم قيّم منطق الخطوات والطريقة والناتج النهائي، إذا كانت الخطوات صحيحة والناتج فقط خطأ حسابي اخصم درجة واحدة فقط. في كلتا الحالتين: أعد حساب الجواب النموذجي بنفسك للتحقق، راعِ أولوية العمليات (ضرب وقسمة قبل جمع وطرح). الملاحظات بالعربية الفصحى بأسلوب تربوي عراقي." :
-          "أنت معلم محترف خبير في التصحيح. لكل سؤال: صنّف نوعه أولاً — (أ) إجابة مباشرة (كلمة أو عبارة قصيرة): قارن بصرياً ما كتبه الطالب بالجواب النموذجي مباشرة. (ب) سؤال يتطلب شرحاً أو فهماً: افهم المطلوب من السؤال، ثم قيّم مدى فهم الطالب وصحة إجابته، اعتمد تصحيحاً مرناً ومتدرجاً. الملاحظات بالعربية الفصحى دائماً."
+          "أنت مصحح رياضيات خبير. لا يوجد جواب نموذجي — أنت تحل السؤال بنفسك أولاً ثم تقارن. لكل سؤال: (١) احسب الجواب الصحيح بنفسك وتحقق منه. (٢) صنّف النوع: (أ) إجابة مباشرة: قارن ما كتبه الطالب بجوابك أنت، صح=درجة كاملة خطأ=صفر. (ب) مسألة بخطوات: قيّم الطريقة والخطوات والناتج، إذا كانت الخطوات صحيحة والناتج فقط خطأ حسابي اخصم درجة واحدة فقط. في كلتا الحالتين: راعِ أولوية العمليات (ضرب وقسمة قبل جمع وطرح)، وتحقق من حسابك قبل الحكم. الملاحظات بالعربية الفصحى بأسلوب تربوي عراقي." :
+          "أنت معلم محترف خبير في التصحيح. لا يوجد جواب نموذجي — أنت تحدد الجواب الصحيح بنفسك من معرفتك. لكل سؤال: (١) حدد الجواب الصحيح أو النقاط المطلوبة بنفسك. (٢) إذا وُجدت معايير تصحيح (gradingCriteria) استخدمها كمرشد. (٣) صنّف النوع: (أ) إجابة مباشرة: قارن إجابة الطالب بما تعرفه. (ب) سؤال يتطلب شرحاً: قيّم الدقة والنقاط المغطاة والمنطق، وامنح درجات جزئية متدرجة. الملاحظات بالعربية الفصحى دائماً."
       }
     });
 
