@@ -17,6 +17,7 @@ export interface Question {
 export interface GradingResult {
   questionId: string;
   studentAnswer: string;
+  studentAnswerImage?: string;  // base64 للصورة المقتصّة لإجابة الطالب
   studentFinalResult?: string;
   studentAnswerNormalized?: string;
   studentFinalResultNormalized?: string;
@@ -873,6 +874,7 @@ ${skipNote}
           return {
             ...qData,
             questionId: q.id,
+            studentAnswerImage: hasCrop ? questionImage : null,
             croppedImageBase64: hasCrop ? questionImage : null
           };
         } catch {
@@ -927,6 +929,7 @@ ${skipNote}
             questionId: g.questionId || sourceQuestion?.id,
             questionKey: g.questionKey || sourceQuestion?.questionKey || sourceQuestion?.label,
             displayLabel: g.displayLabel || sourceQuestion?.displayLabel || sourceQuestion?.label,
+            studentAnswerImage: g.studentAnswerImage || g.croppedImageBase64 || null,
             studentAnswerNormalized: g.studentAnswerNormalized || normalizeMathText(g.studentAnswer || ''),
             studentFinalResultNormalized: g.studentFinalResultNormalized || normalizeMathText(g.studentFinalResult || ''),
             maxGrade,
@@ -977,6 +980,7 @@ ${skipNote}
             questionKey: fq.questionKey || fq.label,
             displayLabel: fq.displayLabel || fq.label,
             studentAnswer: '',
+            studentAnswerImage: null,
             studentAnswerNormalized: '',
             studentFinalResult: '',
             studentFinalResultNormalized: '',
