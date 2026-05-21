@@ -1,5 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // apiErrors.ts  —  Friendly error messages for Gemini API failures
+// SECURITY: Raw error messages are NEVER exposed to the user — they may
+//           contain sensitive data such as API keys.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ApiErrorInfo {
@@ -11,28 +13,50 @@ export interface ApiErrorInfo {
 }
 
 /**
+ * Strips any API key patterns from a string so they are never shown to users.
+ * Matches common Gemini/Google key formats (39-char alphanumeric after "key:").
+ */
+function sanitize(text: string): string {
+  return text
+    // Remove "api_key:XXXXX" patterns (as seen in "Consumer 'api_key:AIza...'")
+    .replace(/api[_-]?key[:\s'"]+[A-Za-z0-9_\-]{10,}/gi, 'api_key:***')
+    // Remove bare AIza... keys (Google API key prefix)
+    .replace(/AIza[A-Za-z0-9_\-]{30,}/g, 'AIza***')
+    // Remove generic long alphanumeric tokens that look like secrets
+    .replace(/[A-Za-z0-9_\-]{35,}/g, '***');
+}
+
+/**
  * Parses any thrown error from Gemini API calls and returns a user-friendly
- * Arabic error object ready to display in the UI.
+ * Arabic error object. Raw messages are sanitized and never shown as-is.
  */
 export function parseApiError(error: unknown): ApiErrorInfo {
   const raw = error instanceof Error ? error.message : String(error);
 
-  // Try to extract JSON body Gemini sometimes embeds in the message
+  // Try to extract structured info from JSON Gemini embeds in the message
   let code: number | null = null;
   let status: string | null = null;
-  let geminiMessage: string | null = null;
 
   try {
-    // Pattern: the message itself IS json, or json is embedded after a colon
     const jsonMatch = raw.match(/\{[\s\S]*"error"[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      code    = parsed?.error?.code    ?? null;
-      status  = parsed?.error?.status  ?? null;
-      geminiMessage = parsed?.error?.message ?? null;
+      code   = parsed?.error?.code   ?? null;
+      status = parsed?.error?.status ?? null;
     }
   } catch {
-    // raw is plain text — fall through to keyword matching below
+    // plain text message — fall through to keyword matching
+  }
+
+  // ── Suspended / Permission denied (key revoked or banned) ─────────────────
+  if (raw.includes('suspended') || raw.includes('Permission denied') || raw.includes('has been suspended')) {
+    return {
+      icon: '🚫',
+      title: 'مفتاح API موقوف',
+      message: 'تم إيقاف مفتاح Gemini API المستخدم من قِبل Google.',
+      suggestion: 'افتح إعدادات التطبيق (⚙️) وأدخل مفتاح API جديداً من Google AI Studio.',
+      canRetry: false,
+    };
   }
 
   // ── 503 / UNAVAILABLE  (high demand / overloaded) ─────────────────────────
@@ -57,12 +81,12 @@ export function parseApiError(error: unknown): ApiErrorInfo {
     };
   }
 
-  // ── 401 / UNAUTHENTICATED  (wrong key) ────────────────────────────────────
-  if (code === 401 || status === 'UNAUTHENTICATED' || raw.includes('API key') || raw.includes('UNAUTHENTICATED') || raw.includes('مفتاح API')) {
+  // ── 401 / UNAUTHENTICATED  (wrong or invalid key) ─────────────────────────
+  if (code === 401 || status === 'UNAUTHENTICATED' || raw.includes('UNAUTHENTICATED') || raw.includes('invalid') && raw.includes('key')) {
     return {
       icon: '🔑',
       title: 'مفتاح API غير صحيح',
-      message: 'مفتاح Gemini API المُدخل غير صالح أو غير مضبوط.',
+      message: 'مفتاح Gemini API المُدخل غير صالح أو منتهي الصلاحية.',
       suggestion: 'افتح إعدادات التطبيق (⚙️) وتأكد من إدخال مفتاح API الصحيح من Google AI Studio.',
       canRetry: false,
     };
@@ -123,11 +147,13 @@ export function parseApiError(error: unknown): ApiErrorInfo {
     };
   }
 
-  // ── Fallback — unknown error ──────────────────────────────────────────────
+  // ── Fallback — NEVER expose raw message (may contain API key) ────────────
+  // Log to console for debugging (server-side only, not visible to users)
+  console.error('[apiErrors] Unclassified error (sanitized):', sanitize(raw));
   return {
     icon: '❌',
     title: 'حدث خطأ غير متوقع',
-    message: geminiMessage || raw || 'خطأ غير معروف.',
+    message: 'تعذّرت العملية بسبب خطأ غير معروف.',
     suggestion: 'أعد المحاولة. إذا استمر الخطأ، تحقق من إعدادات مفتاح API أو تواصل مع الدعم.',
     canRetry: true,
   };
@@ -135,7 +161,7 @@ export function parseApiError(error: unknown): ApiErrorInfo {
 
 /**
  * Formats an ApiErrorInfo into a single readable Arabic string.
- * Useful for places that still use alert() or toast.
+ * Safe to display to users — never contains raw error data or API keys.
  */
 export function formatApiError(error: unknown): string {
   const info = parseApiError(error);
