@@ -30,28 +30,105 @@ export interface GradingResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// API key helpers
+// API key helpers — dual-key fallback system
+//
+// Cloudflare Pages + Vite: env vars must be prefixed with VITE_ to be exposed
+// to the browser at build time via import.meta.env.
+//
+// Expected variable names in Cloudflare Pages → Settings → Environment Variables:
+//   VITE_GEMINI_API_KEY         ← primary key
+//   VITE_GEMINI_API_KEY_BACKUP  ← backup key (optional)
+//
+// Priority order for each key:
+//   1. import.meta.env  (Cloudflare Pages / Vite build-time injection)
+//   2. localStorage     (entered manually via the ⚙️ settings UI)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const getApiKey = (): string => {
-  const viteKey = import.meta.env?.VITE_GEMINI_API_KEY;
-  if (viteKey && viteKey !== "undefined" && viteKey !== "") return viteKey.trim();
+const LS_PRIMARY = "GEMINI_API_KEY_FALLBACK";
+const LS_BACKUP  = "GEMINI_API_KEY_BACKUP";
+
+// Model name — reads from VITE_GEMINI_MODEL env var, falls back to gemini-2.5-flash
+const GEMINI_MODEL = (() => {
   try {
-    const envKey =
-      process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY;
-    if (envKey && envKey !== "undefined" && envKey !== "") return envKey.trim();
-  } catch {
-    // process not available in browser
-  }
-  return (localStorage.getItem("GEMINI_API_KEY_FALLBACK") || "").trim();
+    const m = (import.meta.env as Record<string, string>)["VITE_GEMINI_MODEL"];
+    if (m && m.trim()) return m.trim();
+  } catch { /* */ }
+  return "gemini-2.5-flash";
+})();
+
+const readKey = (envName: string, lsKey: string): string => {
+  // 1. Cloudflare Pages / Vite — build-time environment variable
+  try {
+    const envVal = (import.meta.env as Record<string, string>)[envName];
+    if (envVal && envVal !== "undefined" && envVal.trim() !== "") {
+      return envVal.trim();
+    }
+  } catch { /* import.meta.env not available */ }
+
+  // 2. localStorage — manual entry via settings UI
+  return (localStorage.getItem(lsKey) || "").trim();
 };
 
-const getApiKeyErrorMessage = (): string => {
-  const isNetlify = window.location.hostname.includes("netlify.app");
-  return isNetlify
-    ? "مفتاح API غير مضبوط. إذا كنت تستخدم Netlify، تأكد من إضافة المفتاح باسم VITE_GEMINI_API_KEY في إعدادات البيئة. يمكنك أيضاً إدخاله يدوياً من أيقونة الإعدادات (⚙️) في الأعلى."
-    : "مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.";
+const getPrimaryKey = (): string => readKey("VITE_GEMINI_API_KEY",           LS_PRIMARY);
+const getBackupKey  = (): string =>
+  readKey("VITE_GEMINI_API_KEY_SECONDARY", LS_BACKUP) ||
+  readKey("VITE_GEMINI_API_KEY_2",         LS_BACKUP);
+
+/** Returns [primaryKey, backupKey | undefined] */
+const getApiKeys = (): [string, string | undefined] => {
+  const primary = getPrimaryKey();
+  const backup  = getBackupKey() || undefined;
+  return [primary, backup];
 };
+
+/** Save primary key manually from the settings UI */
+export const savePrimaryApiKey = (key: string): void => {
+  localStorage.setItem(LS_PRIMARY, key.trim());
+};
+
+/** Save backup key manually from the settings UI */
+export const saveBackupApiKey = (key: string): void => {
+  localStorage.setItem(LS_BACKUP, key.trim());
+};
+
+/** Check whether a backup key has been configured */
+export const hasBackupApiKey = (): boolean => !!getBackupKey();
+
+const getApiKeyErrorMessage = (): string => {
+  const isCloudflare = window.location.hostname.includes(".pages.dev") ||
+                       window.location.hostname.includes("cloudflare");
+  if (isCloudflare) {
+    return "مفتاح API غير مضبوط. تأكد من إضافة المتغيرات في Cloudflare Pages → Settings → Environment Variables باسم VITE_GEMINI_API_KEY، ثم أعد نشر المشروع (Redeploy). يمكنك أيضاً إدخال المفتاح يدوياً من أيقونة الإعدادات (⚙️).";
+  }
+  return "مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.";
+};
+
+/**
+ * Executes an API call with automatic fallback to the backup key on any error.
+ * `fn` receives an initialized GoogleGenAI instance.
+ */
+async function withKeyFallback<T>(fn: (ai: GoogleGenAI, keyLabel: string) => Promise<T>): Promise<T> {
+  const [primary, backup] = getApiKeys();
+
+  if (!primary) throw new Error(getApiKeyErrorMessage());
+
+  try {
+    return await fn(new GoogleGenAI({ apiKey: primary }), "primary");
+  } catch (primaryError: any) {
+    // No backup configured — re-throw immediately
+    if (!backup) throw primaryError;
+
+    // Switch to backup (log sanitized — no key values exposed)
+    console.warn("[geminiService] Primary key failed, switching to backup.", primaryError?.message?.slice(0, 80));
+
+    try {
+      return await fn(new GoogleGenAI({ apiKey: backup }), "backup");
+    } catch (backupError: any) {
+      console.error("[geminiService] Backup key also failed.");
+      throw backupError;
+    }
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -115,10 +192,6 @@ export async function extractExamFromDualImages(
   answerImages: string[]
 ): Promise<{ title: string; questions: Question[]; requiredQuestionsCount?: number }> {
   try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
     const compress = (b64: string) =>
       compressImage(
         b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`,
@@ -152,16 +225,18 @@ CRITICAL:
       { text: prompt },
     ];
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction:
-          "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown.",
-      },
-    });
+    const response = await withKeyFallback((ai) =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: { parts },
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.1,
+          systemInstruction:
+            "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown.",
+        },
+      })
+    );
 
     const data = JSON.parse(cleanJson(response.text || "{}"));
     if (data && Array.isArray(data.questions)) {
@@ -182,10 +257,6 @@ export async function extractExamFromImages(
   base64Images: string[]
 ): Promise<{ title: string; questions: Question[]; requiredQuestionsCount?: number }> {
   try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
     const imagesData = await Promise.all(
       base64Images.map((b64) =>
         compressImage(
@@ -213,16 +284,18 @@ CRITICAL:
       { text: prompt },
     ];
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction:
-          "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears.",
-      },
-    });
+    const response = await withKeyFallback((ai) =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: { parts },
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.1,
+          systemInstruction:
+            "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears.",
+        },
+      })
+    );
 
     const data = JSON.parse(cleanJson(response.text || "{}"));
     if (data && Array.isArray(data.questions)) {
@@ -248,10 +321,6 @@ export async function gradeStudentPaper(
   onProgress?: (current: number, total: number, phase: "compressing" | "grading") => void
 ): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
   try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
     // ── Compress images ──────────────────────────────────────────────────────
     if (onProgress) onProgress(0, imageUrls.length, "compressing");
     const base64ImagesData: string[] = [];
@@ -382,17 +451,19 @@ FIELD RULES:
       { text: prompt },
     ];
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: isMath
+    const response = await withKeyFallback((ai) =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: { parts },
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0,
+          systemInstruction: isMath
           ? "أنت مصحح رياضيات خبير. لكل سؤال اتبع ثلاث مراحل صارمة بالترتيب: المرحلة ١ (احسب بنفسك): احسب الجواب الصحيح وتحقق منه — مثال: 3×(-17)=-51 تحقق: -51÷3=-17 ✓. المرحلة ٢ (اقرأ ما كتبه الطالب فعلاً): انظر إلى منطقة إجابة الطالب على الورقة واقرأ الأرقام كما هي مكتوبة بالحبر — إذا كتب -41 فاكتب -41 في studentAnswer، إذا كتب -51 فاكتب -51، لا تستبدل ما كتبه الطالب بالجواب الصحيح أبداً، الأرقام المتشابهة مثل 41 و51 و17 و71 تستوجب قراءة دقيقة جداً. المرحلة ٣ (قارن وصحح): قارن STUDENT_WRITTEN مع CORRECT — تطابق=درجة كاملة، خطأ=صفر أو جزئي. حقل studentAnswer = ما كتبه الطالب حرفياً وليس الجواب الصحيح. أولوية العمليات دائماً. الملاحظات بالعربية الفصحى."
           : "أنت معلم محترف خبير. لكل سؤال اتبع ثلاث مراحل: المرحلة ١ (حدد الجواب الصحيح): من معرفتك حدد الجواب أو النقاط المطلوبة، واستخدم gradingCriteria إن وُجد. المرحلة ٢ (اقرأ ما كتبه الطالب): انظر إلى ورقة الطالب واقرأ ما هو مكتوب فعلاً — لا تفسّر ولا تصحح ولا تستبدل، ما كتبه الطالب هو بالضبط ما تضعه في studentAnswer. المرحلة ٣ (قارن وصحح): قارن إجابة الطالب بالجواب الصحيح، للأسئلة المقالية امنح درجات جزئية متدرجة. الملاحظات بالعربية الفصحى دائماً.",
-      },
-    });
+        },
+      })
+    );
 
     if (onProgress) onProgress(100, 100, "grading");
 
