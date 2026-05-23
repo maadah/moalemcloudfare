@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// apiErrors.ts  —  Friendly error messages for Kimi (Moonshot AI) API failures
+// apiErrors.ts  —  Friendly error messages for Gemini API failures
 // SECURITY: Raw error messages are NEVER exposed to the user — they may
 //           contain sensitive data such as API keys.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ export interface ApiErrorInfo {
 
 /**
  * Strips any API key patterns from a string so they are never shown to users.
- * Matches Kimi (sk-...), Google (AIza...), OpenAI (sk-proj-...), and generic tokens.
+ * Matches Google (AIza...) and other common API key prefixes.
  */
 function sanitize(text: string): string {
   return text
@@ -51,17 +51,6 @@ export function parseApiError(error: unknown): ApiErrorInfo {
       title: 'مفتاح API موقوف',
       message: 'تم إيقاف مفتاح API المستخدم من قِبل مزود الخدمة.',
       suggestion: 'افتح إعدادات التطبيق (⚙️) وأدخل مفتاح API جديداً.',
-      canRetry: false,
-    };
-  }
-
-  // ── 402 / Insufficient balance  (Kimi pay-as-you-go) ──────────────────────
-  if (code === 402 || raw.includes('insufficient') || raw.includes('balance') || raw.includes('billing') || raw.includes('payment')) {
-    return {
-      icon: '💳',
-      title: 'الرصيد غير كافٍ',
-      message: 'رصيد حساب Kimi API نفد أو غير مفعّل.',
-      suggestion: 'افتح platform.moonshot.ai وقم بشحن رصيد الحساب، ثم أعد المحاولة.',
       canRetry: false,
     };
   }
@@ -126,7 +115,7 @@ export function parseApiError(error: unknown): ApiErrorInfo {
     return {
       icon: '🛠️',
       title: 'خطأ داخلي في الخادم',
-      message: 'حدث خطأ داخلي في خادم Kimi. هذا ليس خطأ في التطبيق.',
+      message: 'حدث خطأ داخلي في خادم Gemini. هذا ليس خطأ في التطبيق.',
       suggestion: 'أعد المحاولة بعد لحظات. إذا تكرر، قلّل عدد الصور أو الأسئلة وحاول مجدداً.',
       canRetry: true,
     };
@@ -137,7 +126,7 @@ export function parseApiError(error: unknown): ApiErrorInfo {
     return {
       icon: '🌐',
       title: 'انقطع الاتصال بالإنترنت',
-      message: 'تعذّر الوصول إلى خادم Kimi. تحقق من اتصالك بالإنترنت.',
+      message: 'تعذّر الوصول إلى خادم Gemini. تحقق من اتصالك بالإنترنت.',
       suggestion: 'تأكد من اتصالك بالإنترنت ثم أعد المحاولة.',
       canRetry: true,
     };
