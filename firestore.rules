@@ -1,0 +1,159 @@
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: exams
+// Document ID: auto-generated
+// Fields:
+//   - title: string (required)
+//   - totalGrade: number (required)
+//   - questions: array of objects (required)
+//   - createdAt: timestamp (required)
+//   - authorUid: string (required)
+//
+// Collection: results
+// Document ID: auto-generated
+// Fields:
+//   - examId: string (required)
+//   - sessionId: string (optional)
+//   - studentName: string (required)
+//   - totalGrade: number (required)
+//   - gradings: array of objects (required)
+//   - createdAt: timestamp (required)
+//   - authorUid: string (required)
+//
+// Collection: sessions
+// Document ID: auto-generated
+// Fields:
+//   - examId: string (required)
+//   - examTitle: string (required)
+//   - studentCount: number (required)
+//   - createdAt: timestamp (required)
+//   - authorUid: string (required)
+//
+// Collection: users
+// Document ID: user UID
+// Fields:
+//   - uid: string (required)
+//   - email: string (required)
+//   - displayName: string (optional)
+//   - status: string (required, enum: ['pending', 'approved', 'rejected'])
+//   - role: string (required, enum: ['admin', 'user'])
+//   - pageLimit: number (required)
+//   - pagesUsed: number (required)
+//   - createdAt: timestamp (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.get('email', '').lower() == "asmaomar5566@gmail.com" || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isApproved() {
+      return isAuthenticated() && 
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved') || 
+         isAdmin());
+    }
+
+    function isOwner(authorUid) {
+      return isAuthenticated() && request.auth.uid == authorUid;
+    }
+
+    function isValidExam(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.totalGrade is number && data.totalGrade > 0 &&
+             data.questions is list &&
+             data.authorUid == request.auth.uid;
+    }
+
+    function isValidResult(data) {
+      return data.examId is string &&
+             data.studentName is string && data.studentName.size() > 0 &&
+             data.totalGrade is number &&
+             data.gradings is list &&
+             data.authorUid == request.auth.uid;
+    }
+
+    function isValidSession(data) {
+      return data.examId is string &&
+             data.examTitle is string &&
+             data.studentCount is number &&
+             data.authorUid == request.auth.uid;
+    }
+
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.email is string &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.role in ['admin', 'user'] &&
+             data.pageLimit is number &&
+             data.pagesUsed is number &&
+             data.questionsCount is number &&
+             data.gradingsCount is number &&
+             (data.get('isNew', false) is bool);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId && 
+                    isValidUser(request.resource.data) &&
+                    (
+                      (request.auth.token.get('email', '').lower() == "asmaomar5566@gmail.com" && 
+                       request.resource.data.status == 'approved' && 
+                       request.resource.data.role == 'admin') ||
+                      (request.resource.data.status == 'approved' && 
+                       request.resource.data.role == 'user')
+                    ) &&
+                    request.resource.data.pageLimit == 100 &&
+                    request.resource.data.pagesUsed == 0 &&
+                    request.resource.data.questionsCount == 0 &&
+                    request.resource.data.gradingsCount == 0;
+      allow update: if isAdmin() || (isOwner(userId) && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pagesUsed', 'displayName', 'questionsCount', 'gradingsCount', 'isNew']));
+      allow delete: if isAdmin();
+    }
+
+    match /exams/{examId} {
+      allow read: if isOwner(resource.data.authorUid) || isAdmin();
+      allow create: if isApproved() && isValidExam(request.resource.data);
+      allow update: if isOwner(resource.data.authorUid) && isValidExam(request.resource.data);
+      allow delete: if isOwner(resource.data.authorUid) || isAdmin();
+    }
+
+    match /results/{resultId} {
+      allow read: if isOwner(resource.data.authorUid) || isAdmin();
+      allow create: if isApproved() && isValidResult(request.resource.data);
+      allow update: if isOwner(resource.data.authorUid) && isValidResult(request.resource.data);
+      allow delete: if isOwner(resource.data.authorUid) || isAdmin();
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isOwner(resource.data.authorUid) || isAdmin();
+      allow create: if isApproved() && isValidSession(request.resource.data);
+      allow update: if isOwner(resource.data.authorUid) && isValidSession(request.resource.data);
+      allow delete: if isOwner(resource.data.authorUid) || isAdmin();
+    }
+  }
+}
