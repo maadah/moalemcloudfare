@@ -306,47 +306,49 @@ export async function gradeStudentPaper(
     
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
 
-    const prompt = `Perform a RIGOROUS COMPARATIVE AUDIT of the student's paper against the MODEL ANSWER.
-    
-    Current Subject: ${subject}.
-    Questions to grade (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}. 
-    Total Exam Max Grade: ${totalExamGrade}. 
-    Required Questions Count: ${requiredQuestionsCount || 'All'}. 
-    
-    MENTAL PROCEDURE FOR GRADING (DO THIS INTERNALLY FOR EVERY QUESTION):
-    1. Identify Question: Find the student's handwritten answer for a question in the images.
-    2. Read Model Answer: Carefully read the 'answer' provided in the JSON for this question. 
-    3. MANDATORY MATH CHECK: 
-       - If the question is math, YOU MUST RE-CALCULATE the model answer and the student's answer using basic arithmetic rules.
-       - IMPORTANT: 85 ÷ 5 = 17. NOT 18. Verification: 17 * 5 = 85. 
-       - If you read "18" but the math says "17", use "17". Do not hallucinate numbers.
-    4. COMPARE: Match student result with model answer result.
-    
-    ${isMath ? `STRICT MATHEMATICAL LAWS:
-    1. ARITHMETIC INTEGRITY: You MUST be 100% accurate in basic division/multiplication. 
-       - If the model answer is 17 and the student writes 18, it is WRONG.
-       - If the model answer is 17 and the student writes 17, it is RIGHT.
-       - NEVER swap 17 and 18.
-    2. PEMDAS/BODMAS IS SUPREME: Multiplications (×) and Divisions (÷) MUST be performed BEFORE Additions (+) and Subtractions (-).
-       - TEST CASE: 7 × 3 + 2 = 23. If student wrote 35, grade is 0.
-       - TEST CASE: 21 - 4 * 2 = 13. If student wrote 34, grade is 0.
-    3. STEP-BY-STEP CALCULATION: Verify each line of the student's work.
-    4. ZERO LENIENCY for Logic Errors: Priority of operations errors = 0 score.` : 
-    `GRADING STANDARDS:
-    1. FACTUAL ACCURACY: Compare student answers precisely with the MODEL ANSWER.
-    2. KEYWORDS: Check for essential concepts.
-    3. LOGICAL STEPS: The process must align with the model answer's logic.`}
-    
-    CRITICAL GRADING RULES:
-    1. EXHAUSTIVE SEARCH: Grade every visible mark individually.
-    2. PEDANTIC LITERAL OCR (ZERO INFERENCE): In the 'studentAnswer' field, you MUST act as a Literal OCR Robot. 
-       - Transcribe EXACTLY what is written, character by character. 
-       - If the student wrote "68-", you MUST write "68-", even if the math logic suggests it should be "28".
-       - DO NOT use math logic to "correct" the student's transcription.
-       - PRIORTIZE BOXED TEXT: If a student has drawn a box or circle around a number, that number is the student's definitive answer and MUST be transcribed exactly.
-       - Transcribe Arabic/Hindi numerals (٠-٩) and symbols (=, -, +, ×, ÷) with absolute fidelity to the ink on the paper.
-    3. COORDINATES: Provide the 'box' [ymin, xmin, ymax, xmax] precisely.
-    4. JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.`;
+    const prompt = `You are a visual data extraction and comparison engine. Look directly at the handwritten image — do NOT convert to text first.
+
+    Subject: ${subject}.
+    Questions with expected answers (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}.
+    Total Max Score: ${totalExamGrade}.
+    Required Questions Count: ${requiredQuestionsCount || 'All'}.
+
+    FOR EACH QUESTION — FOLLOW THIS EXACT SEQUENCE:
+
+    STEP 1 — LOCATE: Find the region on the image where the student wrote their response for this question number/label.
+
+    STEP 2 — EXTRACT (visual scan only, zero text conversion):
+       - Look at the ink marks directly in the image.
+       - Copy what you SEE into the studentAnswer field — exactly as written, character by character.
+       - If student wrote "68-" → studentAnswer = "68-". If student wrote "-41" → studentAnswer = "-41".
+       - NEVER alter, fix, or interpret what is written. You are a camera, not a reader.
+       - BOXED or CIRCLED ink = the student's final answer — extract it first.
+       - Crossed-out ink = ignore it entirely.
+       - Blank region → studentAnswer = "لا توجد إجابة".
+       - Unclear ink → write what you see, note ambiguity: e.g. "٤١ أو ٥١".
+
+    STEP 3 — COMPARE: Compare the extracted studentAnswer against the 'answer' field in the JSON.
+    ${isMath ? `
+       MATH COMPARISON RULES:
+       - Re-calculate the expected answer yourself first. 85÷5=17 (verify: 17×5=85 ✓).
+       - PEMDAS/BODMAS: × and ÷ before + and −. Always.
+       - studentAnswer matches expected → full score.
+       - studentAnswer wrong → 0 (or partial if method/steps partially correct).
+       - Steps correct but final value wrong → deduct 1 point max.
+    ` : `
+       COMPARISON RULES:
+       - studentAnswer matches expected meaning → full score.
+       - Partially correct → proportional partial score.
+       - Wrong → 0.
+    `}
+
+    STEP 4 — OUTPUT JSON only, no markdown:
+    {"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
+
+    - studentAnswer: exactly what the ink says — never the expected answer unless they visually match.
+    - feedback: Arabic (العربية الفصحى), brief and constructive.
+    - box: [ymin, xmin, ymax, xmax] pixel region (0–1000 scale) of the student's written answer.
+    - pageIndex: 0-based index of the image page.`;`;
 
     const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
@@ -358,9 +360,9 @@ export async function gradeStudentPaper(
         config: { 
           responseMimeType: "application/json",
           temperature: 0,
-          systemInstruction: isMath ? 
-            "أنت مصحح رياضيات دقيق جداً وروبوت استخراج نصوص حرفي. 1) مرحلة الاستخراج: يجب أن تكتب ما تراه في الورقة بدقة 100% حتى لو كان خطأً رياضياً. إذا رأيت '68-' اكتب '68-' ولا تكتب '28' بناءً على استنتاجك. يمنع منعاً باتاً تغيير أي رقم أو رمز يظهر في الورقة. 2) مرحلة التصحيح: اعتمد سياسة تصحيح مرنة (Lenient Grading). إذا كانت خطوات الحل صحيحة ومنطقية ولكن الناتج النهائي فقط خطأ، اخصم درجة واحدة فقط (مثلاً 9/10 أو 4/5). ركز على تقييم الفهم وليس فقط الناتج. يجب أن تكون الملاحظات (feedback) باللغة العربية الفصحى دائماً وبأسلوب تربوي عراقي." :
-            "أنت معلم محترف وروبوت استخراج نصوص حرفي. يجب استخراج إجابة الطالب بدقة كما هي مكتوبة تماماً. اعتمد سياسة تصحيح مرنة؛ إذا كانت الإجابة قريبة من الصواب أو تعبر عن فهم الموضوع، اخصم درجة بسيطة فقط. يجب أن تكون الملاحظات والتعليقات (feedback) باللغة العربية الفصحى دائماً."
+          systemInstruction: isMath ?
+            "أنت محرك بصري لاستخراج البيانات من الصور ومقارنتها. مهمتك الوحيدة: (١) انظر مباشرة إلى الصورة وحدد موقع إجابة الطالب لكل سؤال. (٢) استخرج ما هو مكتوب بالحبر حرفاً بحرف كما تراه — أي رقم تراه انقله كما هو بدون تغيير، إذا رأيت 68- انقل 68- وليس غيرها. (٣) قارن ما استخرجته بالجواب المتوقع في الـ JSON. لا تحوّل الصورة إلى نص أولاً — تعامل معها مباشرة. أولوية العمليات (ضرب وقسمة قبل جمع وطرح) يجب مراعاتها عند المقارنة. الملاحظات بالعربية الفصحى." :
+            "أنت محرك بصري لاستخراج البيانات من الصور ومقارنتها. مهمتك: (١) انظر مباشرة إلى الصورة وحدد موقع إجابة الطالب. (٢) استخرج ما هو مكتوب كما تراه بالضبط — لا تغيّر ولا تفسّر ولا تكمل. (٣) قارن ما استخرجته بالجواب المتوقع في الـ JSON وأعط الدرجة. لا تحوّل الصورة إلى نص أولاً. الملاحظات بالعربية الفصحى دائماً."
         }
       })
     );
