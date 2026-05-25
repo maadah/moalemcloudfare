@@ -7,7 +7,8 @@ import {
   isValidKimiApiKeyFormat,
   getAllPotentialKeys,
   callKimiApi,
-  DEFAULT_KIMI_MODEL
+  DEFAULT_KIMI_MODEL,
+  DEFAULT_OPENROUTER_MODEL
 } from "../../_shared/kimi";
 import { jsonResponse, handleOptions } from "../../_shared/exam-helpers";
 
@@ -46,7 +47,7 @@ export const onRequestGet = async (context: Ctx): Promise<Response> => {
   for (const cand of potentialKeys) {
     const preview = cand.value.length > 8 ? `${cand.value.substring(0, 4)}...${cand.value.substring(cand.value.length - 4)}` : "قصير";
     try {
-      const modelName = cand.provider === 'openrouter' ? 'moonshotai/kimi-k2' : DEFAULT_KIMI_MODEL;
+      const modelName = cand.provider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : DEFAULT_KIMI_MODEL;
       const reply = await callKimiApi({
         apiKey: cand.value,
         provider: cand.provider,

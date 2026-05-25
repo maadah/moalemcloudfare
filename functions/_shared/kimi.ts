@@ -6,6 +6,11 @@
 // ============================================================================
 
 export const DEFAULT_KIMI_MODEL = "kimi-k2.6";
+// On OpenRouter, must use a vision-capable model since this app processes
+// student exam paper images. "moonshotai/kimi-k2" is text-only and will
+// fail with "No endpoints found that support image input".
+// Vision-capable Kimi models on OpenRouter: kimi-k2.6, kimi-k2.5, kimi-vl
+export const DEFAULT_OPENROUTER_MODEL = "moonshotai/kimi-k2.6";
 export const MOONSHOT_BASE_URL = "https://api.moonshot.ai/v1";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -26,24 +31,31 @@ export interface KeyInfo {
 export function cleanApiKey(val: string | undefined | null): string {
   if (!val) return "";
   let cleaned = String(val).trim();
+  
+  // Remove invisible/zero-width characters
   cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  
+  // Handle pasted "export FOO=value" or "FOO=value" — BUT only if the prefix
+  // looks like a variable name (uppercase + underscore), not just any "=".
+  // This avoids breaking keys that legitimately contain "=".
+  if (/^[A-Z_][A-Z0-9_]*\s*=/i.test(cleaned)) {
+    const eqIdx = cleaned.indexOf('=');
+    cleaned = cleaned.substring(eqIdx + 1).trim();
+  }
   if (cleaned.toLowerCase().startsWith('export ')) {
     cleaned = cleaned.substring(7).trim();
   }
-  if (cleaned.includes('=')) {
-    const parts = cleaned.split('=');
-    cleaned = parts[parts.length - 1].trim();
-  }
-  cleaned = cleaned.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFF0D]/g, '-');
-  cleaned = cleaned.replace(/\s*-\s*/g, '-');
+  
+  // Strip surrounding quotes
   while ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
     cleaned = cleaned.substring(1, cleaned.length - 1).trim();
   }
-  cleaned = cleaned.replace(/[\r\n\t\s]/g, '').trim();
-  while ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
-    cleaned = cleaned.substring(1, cleaned.length - 1).trim();
-  }
-  return cleaned.trim();
+  
+  // Remove only outer whitespace (NOT internal — keys shouldn't have spaces
+  // anyway, but if Cloudflare adds something weird, strip them).
+  cleaned = cleaned.replace(/\s/g, '').trim();
+  
+  return cleaned;
 }
 
 export function isValidKimiApiKeyFormat(key: string): boolean {
@@ -211,7 +223,7 @@ export async function executeAiRequest(
       provider === 'openrouter' || customKey.toLowerCase().startsWith('sk-or-') ? 'openrouter' : 'moonshot';
     let modelName = customModel || options.model;
     if (!modelName) {
-      modelName = detectedProvider === 'openrouter' ? 'moonshotai/kimi-k2' : DEFAULT_KIMI_MODEL;
+      modelName = detectedProvider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : DEFAULT_KIMI_MODEL;
     }
     console.log(`[Kimi] Using custom API key from headers (${detectedProvider}).`);
     return await callKimiApi({
@@ -238,7 +250,7 @@ export async function executeAiRequest(
       console.log(`[Kimi] Trying key from "${candidate.name}" via ${candidate.provider} (ends ...${candidate.value.substring(candidate.value.length - 4)})`);
       let modelName = customModel || options.model;
       if (!modelName) {
-        modelName = candidate.provider === 'openrouter' ? 'moonshotai/kimi-k2' : DEFAULT_KIMI_MODEL;
+        modelName = candidate.provider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : DEFAULT_KIMI_MODEL;
       }
       return await callKimiApi({
         apiKey: candidate.value,
