@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Plus, Trash2, Save, FileText, Upload, CheckCircle, 
-  X, XCircle, ChevronDown, ChevronUp, Download, LogIn, 
+  XCircle, ChevronDown, ChevronUp, Download, LogIn, 
   LogOut, Loader2, FileUp, List, Settings, User,
   HelpCircle, CheckSquare, Type, LayoutGrid, Image as ImageIcon,
   ArrowRight, Calendar, Folder, FolderOpen, Users, Camera, Layers,
@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
-import { Question, gradeStudentPaper, gradeMathDirect, extractExamFromImages, extractExamFromDualImages, ensureTwoLevelHierarchy, testApiConnection } from './services/geminiService';
+import { Question, gradeStudentPaper, extractExamFromImages, extractExamFromDualImages } from './services/geminiService';
 import jsPDF from 'jspdf';
 
 const ARABIC_BRANCH_LETTERS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ي'];
@@ -31,28 +31,6 @@ import { twMerge } from 'tailwind-merge';
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
-
-export const isPlainObject = (val: any) => {
-  if (val === null || typeof val !== 'object') return false;
-  const proto = Object.getPrototypeOf(val);
-  return proto === null || proto === Object.prototype;
-};
-
-export const removeUndefinedFields = (obj: any): any => {
-  if (Array.isArray(obj)) {
-    return obj.map(removeUndefinedFields);
-  } else if (obj !== null && typeof obj === 'object' && isPlainObject(obj)) {
-    const cleaned: any = {};
-    for (const key of Object.keys(obj)) {
-      const val = obj[key];
-      if (val !== undefined) {
-        cleaned[key] = removeUndefinedFields(val);
-      }
-    }
-    return cleaned;
-  }
-  return obj;
-};
 
 function ContactButtons({ className }: { className?: string }) {
   return (
@@ -150,7 +128,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-type View = 'dashboard' | 'create-exam' | 'grade-papers' | 'results' | 'admin' | 'math-direct';
+type View = 'dashboard' | 'create-exam' | 'grade-papers' | 'results' | 'admin';
 
 interface UserProfile {
   uid: string;
@@ -415,23 +393,10 @@ const calculateRecursiveTotalGrade = (qs: any[]): number => {
   }, 0);
 };
 
-function cleanQuestionText(text: string, label?: string, isTopLevel: boolean = false) {
+function cleanQuestionText(text: string, label?: string) {
   if (!text) return "";
   let cleaned = text.trim();
   
-  if (isTopLevel) {
-    return cleaned;
-  }
-  
-  // Clean generic question titles like "السؤال الأول", "السؤال الثاني" etc. if they are followed by other text
-  const examLabelRegex = /^(السؤال\s+(الأول|الاول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر))\s*[:\-\s]*/;
-  if (examLabelRegex.test(cleaned)) {
-    const withoutPrefix = cleaned.replace(examLabelRegex, '').trim();
-    if (withoutPrefix.length > 0) {
-      cleaned = withoutPrefix;
-    }
-  }
-
   if (label) {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`^${escapedLabel}[:.\\s-]*`, 'i');
@@ -487,7 +452,7 @@ function GradingResultItem({ question, gradings, onGradeChange, level = 1 }: any
             {onGradeChange ? (
               <input 
                 type="number" 
-                value={grading.grade ?? ''} 
+                value={grading.grade} 
                 onChange={(e) => onGradeChange(question.id, Number(e.target.value))}
                 className="w-16 px-2 py-1 rounded-lg border border-stone-200 text-center font-bold text-emerald-600 focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -910,15 +875,13 @@ function App() {
               {user.email === 'asmaomar5566@gmail.com' && (
                 <button 
                   onClick={() => {
-                    const current = localStorage.getItem('KIMI_API_KEY_FALLBACK') || localStorage.getItem('GEMINI_API_KEY_FALLBACK') || '';
-                    const key = prompt('أدخل مفتاح Kimi (Moonshot) API الجديد (اختياري):', current);
+                    const current = localStorage.getItem('GEMINI_API_KEY_FALLBACK') || '';
+                    const key = prompt('أدخل مفتاح Gemini API الجديد (اختياري):', current);
                     if (key !== null) {
                       if (key.trim()) {
-                        localStorage.setItem('KIMI_API_KEY_FALLBACK', key.trim());
-                        localStorage.removeItem('GEMINI_API_KEY_FALLBACK');
+                        localStorage.setItem('GEMINI_API_KEY_FALLBACK', key.trim());
                         alert('تم حفظ المفتاح بنجاح.');
                       } else {
-                        localStorage.removeItem('KIMI_API_KEY_FALLBACK');
                         localStorage.removeItem('GEMINI_API_KEY_FALLBACK');
                         alert('تم مسح المفتاح، سيتم استخدام المفتاح الافتراضي للمنظمة.');
                       }
@@ -970,7 +933,6 @@ function App() {
               onGrade={(exam) => { setSelectedExam(exam); setView('grade-papers'); }}
               onEditExam={(exam) => { setEditingExam(exam); setView('create-exam'); }}
               onDeleteExam={async (id) => { if(confirm('هل أنت متأكد من حذف هذا الامتحان؟')) await deleteDoc(doc(db, 'exams', id)); }}
-              onMathDirect={() => setView('math-direct')}
             />
           )}
           {view === 'create-exam' && (
@@ -989,13 +951,6 @@ function App() {
               exam={selectedExam} 
               sessions={sessions}
               onComplete={() => setView('results')}
-              onCancel={() => setView('dashboard')}
-            />
-          )}
-          {view === 'math-direct' && (
-            <MathDirectGrader 
-              user={user}
-              userProfile={userProfile}
               onCancel={() => setView('dashboard')}
             />
           )}
@@ -1213,7 +1168,7 @@ function AdminDashboard() {
                   </td>
                   <td className="px-6 py-4">
                     <select 
-                      value={u.pageLimit ?? 100}
+                      value={u.pageLimit}
                       onChange={(e) => updateUserLimit(u.uid, Number(e.target.value))}
                       className="w-28 bg-stone-50 px-3 py-1.5 rounded-lg border border-stone-200 text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold cursor-pointer"
                     >
@@ -1293,7 +1248,7 @@ function AdminDashboard() {
                 <div className="flex-1">
                   <p className="text-[10px] text-stone-400 mb-1 font-bold">الحد المسموح</p>
                   <select 
-                    value={u.pageLimit ?? 100}
+                    value={u.pageLimit}
                     onChange={(e) => updateUserLimit(u.uid, Number(e.target.value))}
                     className="w-full bg-stone-50 px-3 py-2 rounded-xl border border-stone-200 text-xs outline-none font-bold cursor-pointer"
                   >
@@ -1496,31 +1451,7 @@ function StatCard({ icon, label, value, color, description }: { icon: React.Reac
   );
 }
 
-function Dashboard({ exams, userProfile, onNewExam, onGrade, onEditExam, onDeleteExam, onMathDirect }: any) {
-  const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [testResult, setTestResult] = useState<any>(null);
-
-  const handleTestConnection = async () => {
-    setTestStatus('loading');
-    setTestResult(null);
-    try {
-      const res = await testApiConnection();
-      if (res.success) {
-        setTestStatus('success');
-        setTestResult(res);
-      } else {
-        setTestStatus('error');
-        setTestResult(res);
-      }
-    } catch (err: any) {
-      setTestStatus('error');
-      setTestResult({
-        message: "حدث خطأ غير متوقع أثناء الفحص.",
-        errorDetails: err?.message || String(err)
-      });
-    }
-  };
-
+function Dashboard({ exams, userProfile, onNewExam, onGrade, onEditExam, onDeleteExam }: any) {
   const totalQuestions = exams.reduce((acc: number, exam: any) => acc + (exam.questions?.length || 0), 0);
 
   return (
@@ -1535,209 +1466,14 @@ function Dashboard({ exams, userProfile, onNewExam, onGrade, onEditExam, onDelet
           <h2 className="text-2xl md:text-3xl font-bold font-serif italic mb-1">مرحباً بك مجدداً</h2>
           <p className="text-sm md:text-base text-stone-500">إليك نظرة سريعة على نشاطك الحالي</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-          <button 
-            onClick={onMathDirect}
-            className="bg-sky-600 text-white px-6 py-3 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-sky-700 transition-colors shadow-lg shadow-sky-600/10 w-full sm:w-auto"
-          >
-            <BookOpen className="w-5 h-5 text-sky-200" />
-            التصحيح المباشر للرياضيات (بدون حلول نموذجية) 📐
-          </button>
-          <button 
-            onClick={onNewExam}
-            translate="no"
-            className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 w-full sm:w-auto"
-          >
-            <Plus className="w-5 h-5" />
-            امتحان جديد
-          </button>
-        </div>
-      </div>
-
-      {/* Test Connection Card */}
-      <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-start gap-4 text-right">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
-              <Settings className="w-6 h-6 animate-pulse" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-bold text-lg text-stone-800">التحقق من اتصال Kimi API</h3>
-              <p className="text-sm text-stone-500">تحقق بشكل تجريبي من صحة مفتاحك الحالي ومستوى استجابة الذكاء الاصطناعي لتجنب الأخطاء أثناء التصحيح</p>
-            </div>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
-            {testStatus !== 'idle' && (
-              <div className={cn(
-                "text-sm font-medium px-4 py-2.5 rounded-xl border w-full sm:w-auto text-center flex items-center justify-center gap-2",
-                testStatus === 'loading' && "bg-stone-50 text-stone-600 border-stone-200",
-                testStatus === 'success' && "bg-emerald-50 text-emerald-700 border-emerald-200",
-                testStatus === 'error' && "bg-red-50 text-red-700 border-red-200"
-              )}>
-                {testStatus === 'loading' && (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                    <span>جاري فحص الاتصال...</span>
-                  </>
-                )}
-                {testStatus === 'success' && (
-                  <>
-                    <CheckCircle className="w-4 h-4 text-emerald-600" />
-                    <div className="flex flex-col text-right">
-                      <span>{testResult?.message}</span>
-                      <span className="text-[10px] opacity-75">المفتاح النشط: {testResult?.preview}</span>
-                    </div>
-                  </>
-                )}
-                {testStatus === 'error' && (
-                  <>
-                    <XCircle className="w-4 h-4 text-red-600" />
-                    <div className="flex flex-col text-right">
-                      <span>{testResult?.message}</span>
-                      <span className="text-[10px] opacity-75">المفتاح المفحوص: {testResult?.preview || "غير متوفر"}</span>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            <button
-              onClick={handleTestConnection}
-              disabled={testStatus === 'loading'}
-              className="bg-stone-950 text-white hover:bg-stone-800 disabled:opacity-50 transition-colors px-6 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto shadow-md"
-            >
-              {testStatus === 'loading' ? (
-                <Loader2 className="w-5 h-5 animate-spin text-white" />
-              ) : (
-                <CheckSquare className="w-5 h-5 text-emerald-400" />
-              )}
-              اختبار الاتصال
-            </button>
-          </div>
-        </div>
-
-        {/* Swapped Keys Warning */}
-        {testResult?.envScan && testResult.envScan.some((item: any) => item.isSuspiciousSwapped) && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-right space-y-3 mt-4">
-            <div className="flex items-center gap-2 text-red-800 font-bold">
-              <XCircle className="w-5 h-5 text-red-600 shrink-0" />
-              <h4>تنبيه هام جداً: مدخلات الـ Secrets مقلوبة!</h4>
-            </div>
-            <div className="text-sm text-red-900 space-y-2 pr-2 leading-relaxed">
-              <p>لقد لاحظنا أنه عند استيراد المشروع أو إدخال إعدادات الـ Secrets، تَمَّ خلط اسم المتغير (Name) مع قيمته (Value):</p>
-              <p>في جدول الـ Secrets المرفوع، تم رصد المدخلات المقلوبة التالية التي وُضعت مكان "الاسم" (Name):</p>
-              <div className="space-y-1 mt-2">
-                {testResult.envScan.filter((item: any) => item.isSuspiciousSwapped).map((item: any, idx: number) => (
-                  <div key={idx} className="bg-white/90 border border-red-100 p-2.5 rounded-xl font-mono text-xs text-red-950 flex justify-between items-center flex-wrap gap-2">
-                    <span className="text-red-700 font-medium font-sans font-bold">هذه قيمة سرّية تم إدخالها كاسم متغير! ⚠️</span>
-                    <span className="text-stone-800 bg-stone-100 px-2 py-0.5 rounded font-bold border border-stone-200 select-all">{item.key}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-red-800 mt-3 font-semibold leading-relaxed">
-                💡 <strong>طريقة التصحيح لحل المشكلة نهائياً (مهم جداً):</strong>
-                <br />اضغط على رمز الترس (⚙️ Settings) في المتصفح والذهاب لتبويب <strong>Secrets</strong>:
-                <br />1. ابحث عن الأسطر التي تحمل هذه القيم الطويلة في حقل الاسم (Name).
-                <br />2. احذف كل تلك المدخلات باستخدام أيقونة السلة (Delete 🗑️) المقابلة لكل منها للتخلص من التعارض والرموز القديمة.
-                <br />3. أضف سطراً واحداً جديداً ونظيفاً بالكامل: ضع الاسم <code className="bg-white text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-mono select-all font-bold">MOONSHOT_API_KEY</code> في خانة الاسم (Name - العمود الأيسر) ثُم الصق مفتاح API الجديد (الذي يبدأ بـ sk-) في خانة القيمة (Value - العمود الأيمن).
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Diagnostics / Suggestions */}
-        {testStatus === 'error' && testResult?.diagnostics && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-right space-y-3 mt-4">
-            <div className="flex items-center gap-2 text-amber-800 font-bold">
-              <XCircle className="w-5 h-5 text-amber-600 shrink-0" />
-              <h4>تقرير فحص الرموز ومقترحات الحل:</h4>
-            </div>
-            <div className="text-sm text-amber-900 space-y-2 pr-2 leading-relaxed">
-              <p>طول المفتاح المستلم من الإعدادات: <strong className="font-mono bg-amber-100 px-2 py-0.5 rounded">{testResult.diagnostics.length}</strong> حرفاً.</p>
-              
-              {testResult.diagnostics.suggestions && testResult.diagnostics.suggestions.length > 0 ? (
-                <div className="space-y-1.5 mt-2">
-                  <p className="font-semibold text-amber-950 font-bold">لوحظت الأخطاء المحتملة التالية عند القراءة:</p>
-                  <ul className="space-y-1.5 text-amber-950 pr-2">
-                    {testResult.diagnostics.suggestions.map((sug: string, idx: number) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-amber-600 shrink-0 font-bold">←</span>
-                        <span>{sug}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="text-amber-800 mt-1">
-                  المفتاح مطابق شكلياً ومنسق بطريقة صحيحة (يبدأ بـ <code className="bg-amber-100 px-1 rounded font-mono">sk-</code> وطوله مناسب) ولكن تم رفضه تماماً من خوادم Kimi/Moonshot. يرجى مراجعة صلاحية المفتاح أو توليد مفتاح جديد بالكامل عبر منصة Moonshot AI واستبداله.
-                </p>
-              )}
-              
-              <div className="text-xs text-stone-600 border-t border-amber-200/60 pt-3 mt-3">
-                🔹 <strong>تعليمات لحل المشكلة:</strong> اذهب لإعدادات Cloudflare Pages الخاصة بمشروعك ← Settings ← Environment variables، أضف متغيراً جديداً باسم <code className="bg-stone-100 text-stone-800 px-1 py-0.5 rounded font-mono select-all">MOONSHOT_API_KEY</code> وضع القيمة الصافية لمفتاحك (الذي يبدأ بـ sk-) مباشرة فيه بدون اسم المتغير وبدون أي علامات تنصيص، ثم احفظ الإعدادات وأعد نشر التطبيق ثم حاول من جديد.
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Detected Keys Table */}
-        {testResult?.detectedKeys && (
-          <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 mt-3 text-right">
-            <h5 className="font-bold text-xs text-stone-700 mb-2.5">🔍 فحص متغيرات البيئة والمفاتيح النشطة في التطبيق:</h5>
-            <div className="space-y-2 text-xs">
-              {testResult.detectedKeys.map((k: any, idx: number) => (
-                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 rounded-xl border border-stone-200 bg-white">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-stone-900 bg-stone-100 px-1.5 py-0.5 rounded text-[11px] font-semibold">{k.name}</span>
-                    {k.exists ? (
-                      <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full font-bold">مليء (مكتشف)</span>
-                    ) : (
-                      <span className="text-[10px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-full">فارغ</span>
-                    )}
-                  </div>
-                  {k.exists && (
-                    <div className="flex items-center gap-3 justify-between sm:justify-start">
-                      <span className="text-stone-500 text-[11px]">العرض الأول/الأخير: <strong className="font-mono text-stone-700 bg-stone-50 px-1.5 py-0.5 rounded border border-stone-100 select-all">{k.preview}</strong></span>
-                      <span className="text-[10px] text-stone-400">({k.length} حرف)</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {testResult?.envScan && testResult.envScan.length > 0 && (
-              <div className="mt-4 border-t border-stone-200 pt-3">
-                <h6 className="font-bold text-[11px] text-stone-600 mb-2">📦 متغيرات إضافية ومخصصة تم اكتشافها:</h6>
-                <div className="space-y-1.5">
-                  {testResult.envScan.map((k: any, idx: number) => (
-                    <div key={idx} className={cn(
-                      "flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 rounded-lg border text-[11px]",
-                      k.isSuspiciousSwapped 
-                        ? "border-red-200 bg-red-50 text-red-900 font-bold" 
-                        : "border-stone-100 bg-stone-50/50 text-stone-600"
-                    )}>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-200/60 select-all max-w-[200px] truncate">{k.key}</span>
-                        {k.isSuspiciousSwapped && (
-                          <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold animate-pulse">⚠️ قيمة سريّة مقلوبة كاسم متغير!</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-right">
-                        <span>محتوى المتغير: <strong className="font-mono select-all bg-white px-1 py-0.5 rounded border border-stone-100">{k.preview}</strong></span>
-                        <span className="text-[10px] opacity-70">({k.length} حرف)</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <p className="text-[10px] text-stone-400 mt-2.5 leading-relaxed">
-              * ملاحظة الخطوط: حرف "I" (آي الكبير) في مفاتيح Google يتشابه شكلياً مع حرف "l" (إل الصغير) في خط السيرف المعتاد للأجهزة الذكية (مثال: AIzaSy تظهر AlzaSy). هذا مجرد تشابه في الخط وليس خطأ إملائياً، ويتم نقله والتعامل معه برمجياً كحرف "I" الكبير بشكل سليم.
-            </p>
-          </div>
-        )}
+        <button 
+          onClick={onNewExam}
+          translate="no"
+          className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-medium flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 w-full md:w-auto"
+        >
+          <Plus className="w-5 h-5" />
+          امتحان جديد
+        </button>
       </div>
 
       {/* User Stats Overview */}
@@ -1842,7 +1578,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
   const [round, setRound] = useState(initialData?.round || 'الدور الأول');
   const [totalGrade, setTotalGrade] = useState(initialData?.totalGrade || 100);
   const [requiredQuestionsCount, setRequiredQuestionsCount] = useState<number | null>(initialData?.requiredQuestionsCount || null);
-  const [questions, setQuestions] = useState<Question[]>(() => ensureTwoLevelHierarchy(initialData?.questions || []));
+  const [questions, setQuestions] = useState<Question[]>(initialData?.questions || []);
   const [isSaving, setIsSaving] = useState(false);
   const [savingStatus, setSavingStatus] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
@@ -1989,11 +1725,11 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
           }
         }
 
-        const cleanAllQuestionsText = (qs: Question[], isTopLevel: boolean = true): Question[] => {
+        const cleanAllQuestionsText = (qs: Question[]): Question[] => {
           return qs.map(q => ({
             ...q,
-            text: cleanQuestionText(q.text, undefined, isTopLevel),
-            subQuestions: q.subQuestions ? cleanAllQuestionsText(q.subQuestions, false) : []
+            text: cleanQuestionText(q.text),
+            subQuestions: q.subQuestions ? cleanAllQuestionsText(q.subQuestions) : []
           }));
         };
 
@@ -2167,7 +1903,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
       const processedQuestions = await processQuestionsForStorage(questions);
       
       setSavingStatus('جاري حفظ البيانات في قاعدة البيانات...');
-      const examData = removeUndefinedFields({
+      const examData = {
         title,
         duration,
         study,
@@ -2177,7 +1913,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
         questions: processedQuestions,
         authorUid: user.uid,
         updatedAt: serverTimestamp()
-      });
+      };
 
       if (initialData?.id) {
         try {
@@ -2284,32 +2020,65 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
 
       {/* Structured Extraction Options */}
       {!initialData && questions.length === 0 && !extractionMode && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto" data-html2canvas-ignore>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" data-html2canvas-ignore>
+          <button 
+            onClick={() => {
+              setExtractionMode('dual');
+              setDualQImages([]);
+              setDualAImages([]);
+            }}
+            className="flex flex-col items-center gap-4 p-6 bg-emerald-50 border-2 border-emerald-100 rounded-3xl hover:border-emerald-300 hover:bg-emerald-100/50 transition-all text-right group ring-1 ring-emerald-200"
+          >
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+              <Layers className="w-6 h-6 text-emerald-600" />
+            </div>
+            <div>
+              <p className="font-bold text-emerald-900 mb-1 leading-tight">الخيار الأول: (أسئلة + أجوبة) منفصلة</p>
+              <p className="text-[11px] text-emerald-700 leading-relaxed">استخراج من صورتين مختلفتين، صورة لورقة الأسئلة وصورة لورقة الأجوبة النموذجية.</p>
+            </div>
+          </button>
+
           <button 
             onClick={() => {
               setExtractionMode('single');
               extractionInputRef.current?.click();
             }}
-            className="flex flex-col items-center gap-4 p-6 bg-stone-50 border-2 border-stone-100 rounded-3xl hover:border-emerald-350 hover:bg-white transition-all text-right group shadow-sm hover:shadow-md"
+            className="flex flex-col items-center gap-4 p-6 bg-stone-50 border-2 border-stone-100 rounded-3xl hover:border-emerald-300 hover:bg-white transition-all text-right group"
           >
-            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform border border-stone-100">
-              <FileUp className="w-6 h-6 text-emerald-600" />
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+              <FileUp className="w-6 h-6 text-stone-600" />
             </div>
             <div>
-              <p className="font-bold text-stone-900 mb-1 leading-tight text-base">الخيار الأول: ورقة (سؤال وجواب)</p>
+              <p className="font-bold text-stone-900 mb-1 leading-tight">الخيار الثاني: ورقة (سؤال وجواب)</p>
               <p className="text-[11px] text-stone-500 leading-relaxed">يرفع صورة واحدة لكل سؤال وتحته الجواب، سيتم الربط تلقائياً.</p>
             </div>
           </button>
 
           <button 
-            onClick={() => setExtractionMode('manual')}
-            className="flex flex-col items-center gap-4 p-6 bg-blue-50/50 border-2 border-blue-105 rounded-3xl hover:border-blue-300 hover:bg-white transition-all text-right group shadow-sm hover:shadow-md"
+            onClick={() => {
+              setExtractionMode('single');
+              extractionCameraInputRef.current?.click();
+            }}
+            className="flex flex-col items-center gap-4 p-6 bg-stone-50 border-2 border-stone-100 rounded-3xl hover:border-emerald-300 hover:bg-white transition-all text-right group"
           >
-            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform border border-blue-100">
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+              <Camera className="w-6 h-6 text-stone-600" />
+            </div>
+            <div>
+              <p className="font-bold text-stone-900 mb-1 leading-tight">الخيار الثالث: الفتح السريع (الكاميرا)</p>
+              <p className="text-[11px] text-stone-500 leading-relaxed">تصوير ورقة الامتحان والأجوبة بشكل هجين وسريع ومباشر عبر كاميرا الجهاز.</p>
+            </div>
+          </button>
+
+          <button 
+            onClick={() => setExtractionMode('manual')}
+            className="flex flex-col items-center gap-4 p-6 bg-blue-50 border-2 border-blue-100 rounded-3xl hover:border-blue-300 hover:bg-white transition-all text-right group"
+          >
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
               <PlusCircle className="w-6 h-6 text-blue-600" />
             </div>
             <div>
-              <p className="font-bold text-blue-900 mb-1 leading-tight text-base">الخيار الثاني: إضافة يدوية</p>
+              <p className="font-bold text-blue-900 mb-1 leading-tight">الخيار الرابع: إضافة يدوية</p>
               <p className="text-[11px] text-blue-500 leading-relaxed">كتابة الأسئلة والأجوبة وتحديد الدرجات يدوياً دون الحاجة لاستخراج من الصور.</p>
             </div>
           </button>
@@ -2445,7 +2214,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
             <label className="text-sm font-medium text-stone-500">عنوان الامتحان / المادة</label>
             <input 
               type="text"
-              value={title ?? ''} 
+              value={title} 
               onChange={(e) => setTitle(e.target.value)}
               placeholder="مثال: الكيمياء"
               className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
@@ -2455,7 +2224,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
             <label className="text-sm font-medium text-stone-500">الدراسة</label>
             <input 
               type="text" 
-              value={study ?? ''} 
+              value={study} 
               onChange={(e) => setStudy(e.target.value)}
               placeholder="مثال: الإعدادية / العلمي"
               className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
@@ -2465,7 +2234,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
             <label className="text-sm font-medium text-stone-500">الدور</label>
             <input 
               type="text" 
-              value={round ?? ''} 
+              value={round} 
               onChange={(e) => setRound(e.target.value)}
               placeholder="مثال: الدور الأول"
               className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
@@ -2479,7 +2248,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                 <label className="text-sm font-medium text-stone-500">الدرجة الكلية</label>
                 <input 
                   type="number" 
-                  value={totalGrade ?? ''} 
+                  value={totalGrade} 
                   onChange={(e) => setTotalGrade(Number(e.target.value))}
                   className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                 />
@@ -2488,7 +2257,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                 <label className="text-sm font-medium text-stone-500">عدد الأسئلة المطلوب حلها</label>
                 <input 
                   type="number" 
-                  value={requiredQuestionsCount ?? ''} 
+                  value={requiredQuestionsCount || ''} 
                   onChange={(e) => setRequiredQuestionsCount(e.target.value ? Number(e.target.value) : null)}
                   placeholder={`الافتراضي: ${questions.length || 0}`}
                   className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
@@ -2498,7 +2267,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                 <label className="text-sm font-medium text-stone-500">الوقت (مثلاً: ثلاث ساعات)</label>
                 <input 
                   type="text" 
-                  value={duration ?? ''} 
+                  value={duration} 
                   onChange={(e) => setDuration(e.target.value)}
                   placeholder="الوقت المخصص"
                   className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
@@ -2558,7 +2327,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                       <div key={sq.id} className="space-y-4">
                         <div className="flex justify-between">
                           <p className="font-medium leading-relaxed">
-                            {q.subStyle === 'letters' ? `${ARABIC_BRANCH_LETTERS[sqIdx % ARABIC_BRANCH_LETTERS.length]}- ` : `${sqIdx + 1}- `}
+                            {q.subStyle === 'letters' ? `${String.fromCharCode(1571 + sqIdx)}- ` : `${sqIdx + 1}- `}
                             {cleanQuestionText(sq.text)}
                           </p>
                           <span className="text-sm">({formatGrade(sq.grade)} درجة)</span>
@@ -2632,7 +2401,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                     {q.subQuestions?.map((sq, sqIdx) => (
                       <div key={sq.id} className="space-y-6 border-r-2 border-stone-100 pr-4">
                         <div className="flex justify-between font-bold">
-                          <p className="leading-relaxed">{q.subStyle === 'letters' ? `${ARABIC_BRANCH_LETTERS[sqIdx % ARABIC_BRANCH_LETTERS.length]}- ` : `${sqIdx + 1}- `} {cleanQuestionText(sq.text)}</p>
+                          <p className="leading-relaxed">{q.subStyle === 'letters' ? `${String.fromCharCode(1571 + sqIdx)}- ` : `${sqIdx + 1}- `} {cleanQuestionText(sq.text)}</p>
                           <span>{sq.grade} درجة</span>
                         </div>
                         {sq.answer && (
@@ -2717,7 +2486,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                       <span className="text-xs text-stone-400">الدرجة:</span>
                       <input 
                         type="number" 
-                        value={q.grade ?? ''} 
+                        value={q.grade} 
                         onChange={(e) => updateQuestion(q.id, { grade: Number(e.target.value) })}
                         className="w-16 px-2 py-1 rounded-lg border border-stone-200 text-sm text-center"
                       />
@@ -2725,7 +2494,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                   </div>
                 </div>
                 <textarea 
-                  value={q.text ?? ''} 
+                  value={q.text} 
                   onChange={(e) => {
                     updateQuestion(q.id, { text: e.target.value });
                     e.target.style.height = 'auto';
@@ -2872,7 +2641,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                         </div>
                         <div className="flex flex-1 gap-2">
                           <textarea 
-                            value={sq.text ?? ''} 
+                            value={sq.text} 
                             onChange={(e) => {
                               updateQuestion(sq.id, { text: e.target.value }, q.id);
                               e.target.style.height = 'auto';
@@ -2922,7 +2691,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                             <span className="text-[10px] text-stone-400">الدرجة:</span>
                             <input 
                               type="number" 
-                              value={sq.grade ?? ''} 
+                              value={sq.grade} 
                               onChange={(e) => updateQuestion(sq.id, { grade: Number(e.target.value) }, q.id)}
                               className="w-12 px-1 py-0.5 rounded-md border border-stone-200 text-xs text-center"
                             />
@@ -2941,7 +2710,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                                 <span className="text-[9px] text-stone-400">المطلوب حلها:</span>
                                 <input 
                                   type="number" 
-                                  value={sq.requiredSubCount ?? ''} 
+                                  value={sq.requiredSubCount || ''} 
                                   onChange={(e) => updateQuestion(sq.id, { requiredSubCount: e.target.value ? Number(e.target.value) : undefined }, q.id)}
                                   placeholder={sq.subQuestions?.length.toString()}
                                   className="w-8 px-1 py-0.5 rounded border border-blue-200 text-[9px] text-center"
@@ -2971,7 +2740,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                                 <div className="flex-1 space-y-2">
                                   <div className="flex items-center gap-1.5">
                                     <textarea 
-                                      value={ssq.text ?? ''} 
+                                      value={ssq.text} 
                                       onChange={(e) => {
                                         updateQuestion(ssq.id, { text: e.target.value }, q.id, sq.id);
                                         e.target.style.height = 'auto';
@@ -2995,7 +2764,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                                       />
                                       <input 
                                         type="number" 
-                                        value={ssq.grade ?? ''} 
+                                        value={ssq.grade || ''} 
                                         onChange={(e) => updateQuestion(ssq.id, { grade: Number(e.target.value) }, q.id, sq.id)}
                                         placeholder="درجة"
                                         className="w-10 px-1 py-0.5 rounded border border-emerald-200 text-[10px] text-center bg-white"
@@ -3007,7 +2776,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                                       <CheckSquare className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-700" />
                                     </div>
                                     <textarea 
-                                      value={ssq.answer ?? ''} 
+                                      value={ssq.answer} 
                                       onChange={(e) => {
                                         updateQuestion(ssq.id, { answer: e.target.value }, q.id, sq.id);
                                         e.target.style.height = 'auto';
@@ -3043,7 +2812,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                             <span className="text-[9px] font-bold text-stone-500 text-right">إجابة الفرع النموذجية:</span>
                           </div>
                           <textarea 
-                            value={sq.answer ?? ''} 
+                            value={sq.answer} 
                             onChange={(e) => {
                               updateQuestion(sq.id, { answer: e.target.value }, q.id);
                               e.target.style.height = 'auto';
@@ -3079,7 +2848,7 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                       <span className="text-xs font-bold text-stone-500">الإجابة النموذجية للسؤال:</span>
                     </div>
                     <textarea 
-                      value={q.answer ?? ''} 
+                      value={q.answer} 
                       onChange={(e) => {
                         updateQuestion(q.id, { answer: e.target.value });
                         e.target.style.height = 'auto';
@@ -3104,22 +2873,9 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
   );
 }
 
-function VisualPaperOverlay({ 
-  imageUrl, 
-  gradings, 
-  allGradings, 
-  pageIndex, 
-  onGradingsChange, 
-  studentName, 
-  totalGrade, 
-  maxGrade, 
-  isFirstPage, 
-  quickGradingActive = true, 
-  activePen = 'correct' 
-}: any) {
+function VisualPaperOverlay({ imageUrl, gradings, studentName, totalGrade, maxGrade, isFirstPage, onAddMark }: any) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const [editingGrading, setEditingGrading] = useState<{ index: number, x: number, y: number } | null>(null);
 
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth, naturalHeight } = e.currentTarget;
@@ -3127,315 +2883,106 @@ function VisualPaperOverlay({
   };
 
   const handleContainerClick = (e: React.MouseEvent) => {
-    if (!containerRef.current) return;
+    if (!onAddMark || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 1000;
     const y = ((e.clientY - rect.top) / rect.height) * 1000;
-
-    // 1. Collision Check against existing Marks of this page index
-    let clickedMarkIndex = -1;
-    let minDistance = 60; // Max click distance tolerance (60 units in 1000x1000 coordinate space)
-
-    gradings.forEach((g: any, i: number) => {
-      if (!g.box) return;
-      const [ymin, xmin, ymax, xmax] = g.box;
-      const centerX = (xmin + xmax) / 2;
-      const centerY = (ymin + ymax) / 2;
-      const dist = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
-      if (dist < minDistance) {
-        minDistance = dist;
-        clickedMarkIndex = i;
-      }
-    });
-
-    if (clickedMarkIndex !== -1) {
-      // Toggle correctness or select for editing
-      const targetMark = gradings[clickedMarkIndex];
-      const globalIdx = allGradings.indexOf(targetMark);
-      if (globalIdx !== -1) {
-        let updatedGradings = [...allGradings];
-        const currentMark = updatedGradings[globalIdx];
-        
-        if (quickGradingActive) {
-          // Toggle correctness: ✓ -> × (grade = 0), × -> ✓ (grade = maxGrade or 1)
-          const maxG = currentMark.maxGrade || 1;
-          const newGrade = currentMark.grade > 0 ? 0 : maxG;
-          currentMark.grade = newGrade;
-        }
-
-        const [ymin, xmin, ymax, xmax] = targetMark.box;
-        const centerX = (xmin + xmax) / 2;
-        const centerY = (ymin + ymax) / 2;
-        setEditingGrading({ index: globalIdx, x: centerX, y: centerY });
-        
-        onGradingsChange(updatedGradings);
-      }
-    } else {
-      // Clicked on empty space: Add a new mark box [y-20, x-20, y+20, x+20]
-      const box: [number, number, number, number] = [y - 20, x - 20, y + 20, x + 20];
-      const defaultGrade = (quickGradingActive && activePen === 'incorrect') ? 0 : 1;
-
-      const newGrading = {
-        questionId: `manual_${Date.now()}`,
-        studentAnswer: 'تأشير يدوي',
-        grade: defaultGrade,
-        maxGrade: 1,
-        feedback: 'تمت الإضافة يدوياً',
-        box,
-        pageIndex: pageIndex
-      };
-
-      const updatedGradings = [...allGradings, newGrading];
-      onGradingsChange(updatedGradings);
-
-      // Immediately open editing for the newly placed mark so they can adjust the score
-      setEditingGrading({ index: updatedGradings.length - 1, x: x, y: y });
-    }
+    
+    // Add a default mark at this location (roughly)
+    onAddMark([y - 20, x - 20, y + 20, x + 20]);
   };
 
-  const finalMaxGrade = maxGrade || calculateRecursiveTotalGrade(Array.isArray(gradings) ? [] : []);
+  const finalMaxGrade = maxGrade || calculateRecursiveTotalGrade(Array.isArray(gradings) ? [] : []); // Fallback not easily possible here without questions structure
   
   return (
-    <div className="relative w-full rounded-2xl overflow-hidden shadow-sm border border-stone-200 bg-stone-100">
-      <div 
-        ref={containerRef} 
-        className="relative w-full cursor-crosshair"
-        onClick={handleContainerClick}
-      >
-        <img 
-          src={imageUrl} 
-          alt="" 
-          className="w-full h-auto block pointer-events-none" 
-          onLoad={handleImageLoad}
-          crossOrigin="anonymous"
-        />
-        {dimensions.width > 0 && (
-          <svg 
-            viewBox="0 0 1000 1000" 
-            preserveAspectRatio="none"
-            className="absolute inset-0 w-full h-full pointer-events-none"
-          >
-            {/* Marks for each grading */}
-            {gradings.map((g: any, i: number) => {
-              if (!g.box) return null;
-              const [ymin, xmin, ymax, xmax] = g.box;
-              const maxG = g.maxGrade || 1;
-              const isCorrect = g.grade > 0;
-              const isFull = maxG > 0 && g.grade >= maxG;
-              const isPartialLow = maxG > 0 && isCorrect && g.grade < (maxG * 0.7);
-              
-              const markColor = isFull ? "#059669" : (isPartialLow ? "#f59e0b" : "#10b981");
-              const finalColor = isCorrect ? markColor : "#dc2626";
-              const globalIdx = allGradings.indexOf(g);
-
-              return (
-                <g key={i}>
-                  {/* Highlight ring for active editing mark */}
-                  {editingGrading && editingGrading.index === globalIdx && (
-                    <rect
-                      x={Math.min(xmin, xmax > 850 ? xmin - 80 : xmax - 10) - 15}
-                      y={Math.min(ymin, (ymin + ymax)/2 - 30) - 15}
-                      width={Math.abs(xmax - xmin) + 140}
-                      height={Math.abs(ymax - ymin) + 70}
-                      fill="none"
-                      stroke="#059669"
-                      strokeWidth="3.5"
-                      strokeDasharray="6 4"
-                      rx="12"
-                    />
-                  )}
-
-                  {/* The Mark (Check or Cross) */}
-                  <text 
-                    x={xmax > 850 ? Math.max(xmin - 15, 50) : Math.min(xmax + 15, 950)} 
-                    y={Math.min(Math.max((ymin + ymax) / 2, 50), 950)} 
-                    fontSize="52" 
-                    fill={finalColor}
-                    className="font-bold select-none drop-shadow-md pb-1"
-                    textAnchor={xmax > 850 ? "end" : "start"}
-                    dominantBaseline="middle"
-                  >
-                    {isCorrect ? "✓" : "×"}
-                  </text>
-                  {/* The Grade for the question */}
-                  <rect 
-                    x={xmax > 850 ? Math.max(xmin - 75, 10) : Math.min(xmax + 75, 940)} 
-                    y={Math.min(Math.max(ymin, 10), 950)} 
-                    width="50" 
-                    height="40" 
-                    rx="8"
-                    fill="white"
-                    fillOpacity="0.95"
-                    stroke={finalColor}
-                    strokeWidth="2.5"
-                    className="drop-shadow-sm"
-                  />
-                  <text 
-                    x={xmax > 850 ? Math.max(xmin - 50, 35) : Math.min(xmax + 100, 965)} 
-                    y={Math.min(Math.max(ymin + 26, 36), 976)} 
-                    fontSize="22" 
-                    fill={finalColor}
-                    className="font-bold select-none"
-                    textAnchor="middle"
-                  >
-                    {g.grade}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* Student Final Grade Overlay (Top Right) */}
-            {isFirstPage && (
-              <g transform="translate(800, 50)">
-                <circle cx="50" cy="50" r="45" fill="white" fillOpacity="0.9" stroke="#059669" strokeWidth="4" />
-                <text x="50" y="45" fontSize="24" fill="#059669" fontWeight="bold" textAnchor="middle">الدرجة</text>
-                <line x1="20" y1="52" x2="80" y2="52" stroke="#059669" strokeWidth="2" />
-                <text x="50" y="78" fontSize="22" fill="#059669" fontWeight="bold" textAnchor="middle">{totalGrade} / {finalMaxGrade || '?'}</text>
-                
-                <text x="-150" y="40" fontSize="24" fill="#374151" fontWeight="bold" textAnchor="end" className="italic">{studentName}</text>
-              </g>
-            )}
-          </svg>
-        )}
-
-        {/* Floating Tooltip to Edit Mark */}
-        {editingGrading && editingGrading.index < allGradings.length && (
-          <div 
-            onClick={(e) => e.stopPropagation()} 
-            className="absolute z-50 bg-white border border-stone-200 shadow-xl rounded-2xl p-4 w-72 text-right transition-all sm:text-sm text-xs"
-            style={{
-              left: `${Math.min(Math.max(editingGrading.x / 10 - 36, 5), 64)}%`,
-              top: `${Math.min(Math.max(editingGrading.y / 10 + 4, 2), 85)}%`,
-            }}
-          >
-            <div className="flex items-center justify-between border-b border-stone-150 pb-2 mb-3">
-              <span className="text-stone-700 font-bold text-sm">تعديل العلامة</span>
-              <button 
-                onClick={() => setEditingGrading(null)} 
-                className="text-stone-400 hover:text-stone-600 p-1 rounded-full hover:bg-stone-50 transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+    <div 
+      ref={containerRef} 
+      className="relative w-full rounded-2xl overflow-hidden shadow-sm border border-stone-200 bg-stone-100 cursor-crosshair"
+      onClick={handleContainerClick}
+    >
+      <img 
+        src={imageUrl} 
+        alt="" 
+        className="w-full h-auto block pointer-events-none" 
+        onLoad={handleImageLoad}
+        crossOrigin="anonymous"
+      />
+      {dimensions.width > 0 && (
+        <svg 
+          viewBox="0 0 1000 1000" 
+          preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full pointer-events-none"
+        >
+          {/* Marks for each grading */}
+          {gradings.map((g: any, i: number) => {
+            if (!g.box) return null;
+            const [ymin, xmin, ymax, xmax] = g.box;
+            const maxG = g.maxGrade || 0;
+            const isCorrect = g.grade > 0;
+            const isFull = maxG > 0 && g.grade >= maxG;
+            const isPartialLow = maxG > 0 && isCorrect && g.grade < (maxG * 0.7);
             
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-1.5">
-                <span className="text-stone-500 font-bold text-xs">الدرجة الحالية:</span>
-                <div className="flex items-center gap-2" dir="ltr">
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      const updated = [...allGradings];
-                      const newVal = Math.max(0, (updated[editingGrading.index].grade || 0) - 0.5);
-                      updated[editingGrading.index].grade = parseFloat(newVal.toFixed(1));
-                      onGradingsChange(updated);
-                    }}
-                    className="w-8 h-8 rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 flex items-center justify-center font-black text-stone-600 text-lg select-none"
-                  >
-                    -
-                  </button>
-                  <input 
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    value={allGradings[editingGrading.index]?.grade ?? 0}
-                    onChange={(e) => {
-                      const updated = [...allGradings];
-                      const val = parseFloat(parseFloat(e.target.value).toFixed(1)) || 0;
-                      updated[editingGrading.index].grade = val;
-                      onGradingsChange(updated);
-                    }}
-                    className="w-16 h-8 text-center border border-stone-200 rounded-lg font-black text-stone-800 focus:outline-none focus:border-emerald-500"
-                  />
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      const updated = [...allGradings];
-                      const newVal = (updated[editingGrading.index].grade || 0) + 0.5;
-                      updated[editingGrading.index].grade = parseFloat(newVal.toFixed(1));
-                      onGradingsChange(updated);
-                    }}
-                    className="w-8 h-8 rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 flex items-center justify-center font-black text-stone-600 text-lg select-none"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
+            // #059669 = Dark Green (Full)
+            // #f59e0b = Amber/Yellow (Partial Low < 70%)
+            // #10b981 = Emerald/Green (Partial High >= 70%)
+            // #dc2626 = Red (Zero)
+            const markColor = isFull ? "#059669" : (isPartialLow ? "#f59e0b" : "#10b981");
+            const finalColor = isCorrect ? markColor : "#dc2626";
 
-              {/* Preset point buttons */}
-              <div className="grid grid-cols-4 gap-1.5 pt-1" dir="rtl">
-                {[0, 0.5, 1, 1.5, 2].map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => {
-                      const updated = [...allGradings];
-                      updated[editingGrading.index].grade = p;
-                      onGradingsChange(updated);
-                    }}
-                    className={cn(
-                      "py-1 rounded-lg text-xs font-bold transition-all border",
-                      allGradings[editingGrading.index]?.grade === p
-                        ? "bg-emerald-500 border-emerald-500 text-white shadow-sm"
-                        : "bg-stone-50 border-stone-200 hover:bg-stone-100 text-stone-600"
-                    )}
-                  >
-                    {p} د
-                  </button>
-                ))}
-                
-                {/* Toggle sign (✓ / ×) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const updated = [...allGradings];
-                    const currentItem = updated[editingGrading.index];
-                    const isCorr = currentItem.grade > 0;
-                    if (isCorr) {
-                      currentItem.grade = 0;
-                    } else {
-                      currentItem.grade = currentItem.maxGrade || 1;
-                    }
-                    onGradingsChange(updated);
-                  }}
-                  className={cn(
-                    "col-span-1 py-1 rounded-lg text-xs font-bold transition-all border flex items-center justify-center",
-                    allGradings[editingGrading.index]?.grade > 0
-                      ? "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
-                      : "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
-                  )}
+            return (
+              <g key={i}>
+                {/* The Mark (Check or Cross) */}
+                <text 
+                  x={xmax > 850 ? Math.max(xmin - 15, 50) : Math.min(xmax + 15, 950)} 
+                  y={Math.min(Math.max((ymin + ymax) / 2, 50), 950)} 
+                  fontSize="52" 
+                  fill={finalColor}
+                  className="font-bold select-none drop-shadow-md"
+                  textAnchor={xmax > 850 ? "end" : "start"}
+                  dominantBaseline="middle"
                 >
-                  {allGradings[editingGrading.index]?.grade > 0 ? "صح ✓" : "خطأ ×"}
-                </button>
-              </div>
+                  {isCorrect ? "✓" : "×"}
+                </text>
+                {/* The Grade for the question */}
+                <rect 
+                  x={xmax > 850 ? Math.max(xmin - 75, 10) : Math.min(xmax + 75, 940)} 
+                  y={Math.min(Math.max(ymin, 10), 950)} 
+                  width="50" 
+                  height="40" 
+                  rx="8"
+                  fill="white"
+                  fillOpacity="0.95"
+                  stroke={finalColor}
+                  strokeWidth="2.5"
+                  className="drop-shadow-sm"
+                />
+                <text 
+                  x={xmax > 850 ? Math.max(xmin - 50, 35) : Math.min(xmax + 100, 965)} 
+                  y={Math.min(Math.max(ymin + 26, 36), 976)} 
+                  fontSize="22" 
+                  fill={finalColor}
+                  className="font-bold select-none"
+                  textAnchor="middle"
+                >
+                  {g.grade}
+                </text>
+              </g>
+            );
+          })}
 
-              {/* Actions (Delete and Done) */}
-              <div className="flex gap-2 pt-2 border-t border-stone-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const updated = allGradings.filter((_: any, idx: number) => idx !== editingGrading.index);
-                    onGradingsChange(updated);
-                    setEditingGrading(null);
-                  }}
-                  className="flex-1 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors flex items-center justify-center gap-1.5 font-bold text-xs"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  حذف
-                </button>
-                
-                <button
-                  type="button"
-                  onClick={() => setEditingGrading(null)}
-                  className="flex-[1.5] py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white transition-colors flex items-center justify-center font-bold text-xs"
-                >
-                  موافق
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+          {/* Student Final Grade Overlay (Top Right) */}
+          {isFirstPage && (
+            <g transform="translate(800, 50)">
+              <circle cx="50" cy="50" r="45" fill="white" fillOpacity="0.9" stroke="#059669" strokeWidth="4" />
+              <text x="50" y="45" fontSize="24" fill="#059669" fontWeight="bold" textAnchor="middle">الدرجة</text>
+              <line x1="20" y1="52" x2="80" y2="52" stroke="#059669" strokeWidth="2" />
+              <text x="50" y="78" fontSize="22" fill="#059669" fontWeight="bold" textAnchor="middle">{totalGrade} / {finalMaxGrade || '?'}</text>
+              
+              <text x="-150" y="40" fontSize="24" fill="#374151" fontWeight="bold" textAnchor="end" className="italic">{studentName}</text>
+            </g>
+          )}
+        </svg>
+      )}
     </div>
   );
 }
@@ -3446,8 +2993,6 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
   const [gradingMode, setGradingMode] = useState<'digital' | 'paper'>('digital');
   const [isGrading, setIsGrading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, phase: '' });
-  const [quickGradingActive, setQuickGradingActive] = useState(true);
-  const [activePen, setActivePen] = useState<'correct' | 'incorrect'>('correct');
   const [selectedSubject, setSelectedSubject] = useState<string>(exam.title || 'رياضيات');
   const [gradingResults, setGradingResults] = useState<any[]>([]);
   const [currentResultIndex, setCurrentResultIndex] = useState(0);
@@ -3457,59 +3002,6 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-
-  const [activeLogs, setActiveLogs] = useState<string[]>([]);
-  const consoleRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (consoleRef.current) {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-    }
-  }, [activeLogs]);
-
-  useEffect(() => {
-    if (!isGrading) {
-      setActiveLogs([]);
-      return;
-    }
-
-    if (progress.phase === 'compressing') {
-      setActiveLogs([
-        "⏳ جاري تهيئة وبدء معالجة الصور...",
-        `📸 تم استقبال عدد ${images.length} صفحة من إجابات الطالب.`,
-        "🛠️ جاري تقليص صور الأوراق تلقائياً بشكل آمن لتسريع الرفع وحفظ النطاق الترددي..."
-      ]);
-    } else if (progress.phase === 'grading') {
-      const allLogs = [
-        "🌐 جاري تأسيس اتصال مشفر وآمن مع خوادم Kimi (Moonshot AI)...",
-        "🔑 فحص واختيار مفتاح API ذكي تلقائياً... تم تفعيل المفتاح النشط الشغال بنجاح!",
-        "🔬 جاري قراءة خط يد الطالب عبر الاستشعار والتعرف البصري (OCR)...",
-        `📐 التعرف على مادة الامتحان: [${selectedSubject}] وضبط بيئة المعلم الذكي.`,
-        "📝 جاري مطابقة إجابات الطالب مع نموذج الحل النموذجي لأسئلة الامتحان...",
-        "⚖️ تفعيل خيار (التصحيح المرن): تقييم الفكر والخطوات الرياضية والتسامح في الهفوات الإملائية.",
-        "✍️ جاري كتابة تعليقات تربوية باللغة العربية الفصحى تشجع الطالب وتشرح الهفوات.",
-        "📊 حساب المجموع الكلي للدرجات تلقائياً واستثنائه من الأجزاء المتروكة لصالح الطالب..."
-      ];
-
-      setActiveLogs(prev => [
-        ...prev,
-        "✅ اكتمل ضغط الصور وتجهيزها بنجاح.",
-        "🚀 بدء تفعيل المعلم الرقمي الذكي للبدء بالتصحيح الاسترشادي الفعلي..."
-      ]);
-
-      let index = 0;
-      const interval = setInterval(() => {
-        if (index < allLogs.length) {
-          setActiveLogs(prev => [...prev, allLogs[index]]);
-          index++;
-        } else {
-          clearInterval(interval);
-        }
-      }, 2000);
-
-      return () => clearInterval(interval);
-    }
-  }, [isGrading, progress.phase, images.length, selectedSubject]);
 
   const examSessions = sessions.filter((s: any) => s.examId === exam.id);
 
@@ -3535,10 +3027,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
   };
 
   const startGrading = async () => {
-    if (images.length === 0) {
-      alert('الرجاء رفع أو تصوير صور أوراق إجابات الطلاب أولاً قبل البدء بالتصحيح الذكي.');
-      return;
-    }
+    if (images.length === 0) return alert('يرجى رفع صور أوراق الطلاب');
     
     // Check usage limit
     if (userProfile && (userProfile.pagesUsed + images.length) > userProfile.pageLimit) {
@@ -3629,7 +3118,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
             ? result.studentName.trim() 
             : `طالب #${Math.floor(Math.random() * 1000)}`;
 
-          await addDoc(collection(db, 'results'), removeUndefinedFields({
+          await addDoc(collection(db, 'results'), {
             studentName: studentName,
             gradings: result.gradings,
             totalGrade: computedTotal,
@@ -3638,7 +3127,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
             examTitle: exam.title,
             authorUid: user.uid,
             createdAt: serverTimestamp()
-          }));
+          });
         } catch (e) {
           handleFirestoreError(e, OperationType.CREATE, 'results');
         }
@@ -3682,323 +3171,145 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
       </div>
 
       {gradingResults.length === 0 ? (
-        isGrading ? (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.98, y: 15 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-white p-6 sm:p-10 rounded-3xl border border-stone-200 shadow-sm space-y-8 text-right"
-          >
-            <div className="flex flex-col items-center text-center space-y-3 pb-6 border-b border-stone-100">
-              <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center relative">
-                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
-                <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white animate-pulse" />
+        <div className="bg-white p-12 rounded-3xl border-2 border-dashed border-stone-200 text-center space-y-6">
+          <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto">
+            <Upload className="w-10 h-10 text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold mb-2">ارفع صور أوراق الطلاب</h3>
+            <p className="text-stone-400 max-w-sm mx-auto">يمكنك رفع عدة صور لنفس الطالب. سيتعرف النظام على اسم الطالب من الورقة الأولى.</p>
+          </div>
+          <input 
+            type="file" 
+            multiple 
+            accept="image/*" 
+            className="hidden" 
+            ref={fileInputRef} 
+            onChange={handleFileChange}
+          />
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment"
+            className="hidden" 
+            ref={cameraInputRef} 
+            onChange={handleFileChange}
+          />
+          <div className="flex flex-wrap gap-4 justify-center">
+            {previews.map((url, i) => (
+              <div key={i} className="relative w-24 h-32 rounded-lg overflow-hidden border border-stone-200 group">
+                <img src={url} alt="" className="w-full h-full object-cover" crossOrigin="anonymous" />
+                <button 
+                  onClick={() => {
+                    setPreviews(previews.filter((_, idx) => idx !== i));
+                    setImages(images.filter((_, idx) => idx !== i));
+                  }}
+                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-stone-900">جاري مراجعة وتصحيح الأوراق الآن</h3>
-                <p className="text-sm text-stone-500 max-w-md mx-auto mt-1">
-                  يقوم المعلم الإلكتروني بمطابقة إجابات الطالب بالنموذج المعتمد والتحقق المنهجي من الحلول والخطوات.
-                </p>
-              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-full max-w-sm space-y-2 mb-4 text-right">
+              <label className="text-sm font-bold text-stone-600 block">مادة الامتحان لتخصيص الذكاء الاصطناعي:</label>
+              {user.email?.toLowerCase()?.trim() === 'asmaomar5566@gmail.com' ? (
+                <select 
+                  value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-stone-700"
+                >
+                  <option value="رياضيات">رياضيات (Math)</option>
+                  <option value="أحياء">أحياء (Biology)</option>
+                  <option value="كيمياء">كيمياء (Chemistry)</option>
+                  <option value="فيزياء">فيزياء (Physics)</option>
+                  <option value="قواعد">قواعد اللغة العربية</option>
+                  <option value="إسلامية">تربية إسلامية</option>
+                  <option value="إنجليزي">لغة إنجليزية</option>
+                  <option value="عام">عام / مادة أخرى</option>
+                </select>
+              ) : (
+                <input 
+                  type="text"
+                  value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  placeholder="مثلاً: رياضيات، أحياء..."
+                  className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-right"
+                />
+              )}
             </div>
 
-            {/* Steps Timeline */}
-            <div className="space-y-6 max-w-lg mx-auto">
-              {/* Step 1 */}
-              <div className="flex items-start gap-4">
-                <div className="flex flex-col items-center select-none">
-                  <div className={cn(
-                    "w-7 h-7 rounded-full flex items-center justify-center border text-[11px] font-black",
-                    progress.phase === 'compressing'
-                      ? "bg-emerald-50 border-emerald-500 text-emerald-600 animate-pulse"
-                      : "bg-emerald-600 border-emerald-600 text-white"
-                  )}>
-                    {progress.phase === 'compressing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "١"}
-                  </div>
-                  <div className="w-0.5 h-10 bg-stone-200 mt-1" />
-                </div>
-                <div className="flex-[4] pt-0.5">
-                  <h4 className="font-bold text-stone-800 text-sm">تهيئة الصور وضغطها التلقائي</h4>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    {progress.phase === 'compressing' 
-                      ? `جاري تقليص الصور لضمان سرعة الرفع وحفظ النطاق... (${progress.current}/${progress.total})` 
-                      : "تم تهيئة جميع أوراق الطالب وضغطها بنجاح 100%."}
-                  </p>
-                </div>
-              </div>
-
-              {/* Step 2 */}
-              <div className="flex items-start gap-4">
-                <div className="flex flex-col items-center select-none">
-                  <div className={cn(
-                    "w-7 h-7 rounded-full flex items-center justify-center border text-[11px] font-black",
-                    progress.phase === 'compressing'
-                      ? "bg-white border-stone-200 text-stone-300"
-                      : "bg-emerald-50 border-emerald-500 text-emerald-600 animate-pulse"
-                  )}>
-                    {progress.phase === 'compressing' ? "٢" : "✓"}
-                  </div>
-                  <div className="w-0.5 h-10 bg-stone-200 mt-1" />
-                </div>
-                <div className="flex-[4] pt-0.5">
-                  <h4 className="font-bold text-stone-800 text-sm">الاتصال الآمن والتحقق من مفاتيح Kimi</h4>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    {progress.phase === 'compressing' 
-                      ? "بانتظار اكتمال معالجة أوراق الطالب..." 
-                      : "تم فحص المفاتيح واجتياز المعطل والمباشرة بربط مشفر مع خوادم Moonshot المستقرة."}
-                  </p>
-                </div>
-              </div>
-
-              {/* Step 3 */}
-              <div className="flex items-start gap-4">
-                <div className="flex flex-col items-center select-none">
-                  <div className={cn(
-                    "w-7 h-7 rounded-full flex items-center justify-center border text-[11px] font-black",
-                    progress.phase === 'compressing'
-                      ? "bg-white border-stone-200 text-stone-300"
-                      : "bg-emerald-50 border-emerald-500 text-emerald-600 animate-pulse"
-                  )}>
-                    {progress.phase === 'compressing' ? "٣" : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  </div>
-                  <div className="w-0.5 h-10 bg-stone-200 mt-1" />
-                </div>
-                <div className="flex-[4] pt-0.5">
-                  <h4 className="font-bold text-stone-800 text-sm">التعرف البصري وقراءة الإجابات المكتوبة بخط اليد</h4>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    {progress.phase === 'compressing' 
-                      ? "بانتظار بدء كشط الإجابات..." 
-                      : "الروبوت البصري يقوم بتحليل السطور والتعرف على الكلمات المكتوبة بقلم الحبر أو الرصاص..."}
-                  </p>
-                </div>
-              </div>
-
-              {/* Step 4 */}
-              <div className="flex items-start gap-4">
-                <div className="flex flex-col items-center select-none">
-                  <div className={cn(
-                    "w-7 h-7 rounded-full flex items-center justify-center border text-[11px] font-black",
-                    progress.phase === 'compressing'
-                      ? "bg-white border-stone-200 text-stone-300"
-                      : "bg-emerald-50 border-emerald-500 text-emerald-600 animate-pulse"
-                  )}>
-                    {"٤"}
-                  </div>
-                  <div className="w-0.5 h-10 bg-stone-200 mt-1" />
-                </div>
-                <div className="flex-[4] pt-0.5">
-                  <h4 className="font-bold text-stone-800 text-sm">التقييم ومطابقة الحلول بالنموذج</h4>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    {progress.phase === 'compressing' 
-                      ? "بانتظار تطبيق سياسة الدرجات..." 
-                      : `مقارنة الحل مادة [${selectedSubject}] مع تفعيل "التصحيح المنهجي المرن" لحساب تعويضات فروع الدرجة.`}
-                  </p>
-                </div>
-              </div>
-
-              {/* Step 5 */}
-              <div className="flex items-start gap-4">
-                <div className="flex flex-col items-center select-none">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center border border-stone-200 bg-white text-stone-300 text-[11px] font-black">
-                    {"٥"}
-                  </div>
-                </div>
-                <div className="flex-[4] pt-0.5">
-                  <h4 className="font-bold text-stone-800 text-sm">الرصد الإحصائي النهائي وحذف فروع الترك</h4>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    احتساب درجات الفراغات، واستثناء أصغر فروع الأسئلة تلقائياً لصالح الطالب لتجهيز جدول العلامات.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Live Console Terminal */}
-            <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between text-[11px] font-bold text-stone-500 px-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-mono text-stone-600">Smart AI Engine Trace...</span>
-                </div>
-                <span>شاشة رصد حركة الذكاء الاصطناعي</span>
-              </div>
-              <div 
-                ref={consoleRef}
-                className="bg-stone-900 text-stone-100 font-mono text-[11px] rounded-2xl p-4 border border-stone-800 h-44 overflow-y-auto space-y-2.5 text-right w-full"
-                dir="rtl"
-              >
-                {activeLogs.map((log, idx) => (
-                  <div key={idx} className="flex gap-2 items-start text-emerald-400 leading-relaxed font-semibold">
-                    <span className="text-stone-500 select-none">&gt;</span>
-                    <span className="text-stone-100">{log}</span>
-                  </div>
-                ))}
-                <div className="flex gap-2 items-center text-stone-500 text-[10px] italic">
-                  <span>&gt; (Listening for live AI-Teacher events...)</span>
-                  <span className="w-1.5 h-3.5 bg-emerald-500 animate-pulse inline-block" />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        ) : (
-          <div 
-            onClick={(e) => {
-              if (previews.length === 0) {
-                fileInputRef.current?.click();
-              }
-            }}
-            className={cn(
-              "bg-white p-6 sm:p-12 rounded-3xl border-2 transition-all text-center space-y-6",
-              previews.length === 0 
-                ? "border-dashed border-stone-200 hover:border-emerald-400 hover:bg-emerald-50/5 cursor-pointer" 
-                : "border-solid border-stone-200"
-            )}
-          >
-            {previews.length === 0 && (
-              <>
-                <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto">
-                  <Upload className="w-10 h-10 text-emerald-600" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold mb-2">ارفع صور أوراق الطلاب</h3>
-                  <p className="text-stone-400 max-w-sm mx-auto">يمكنك رفع عدة صور لنفس الطالب. سيتعرف النظام على اسم الطالب من الورقة الأولى. (اضغط هنا لرفع الصور)</p>
-                </div>
-              </>
-            )}
-            <input 
-              type="file" 
-              multiple 
-              accept="image/*" 
-              className="hidden" 
-              ref={fileInputRef} 
-              onChange={handleFileChange}
-            />
-            <input 
-              type="file" 
-              accept="image/*" 
-              capture="environment"
-              className="hidden" 
-              ref={cameraInputRef} 
-              onChange={handleFileChange}
-            />
-            <div className="flex flex-wrap gap-4 justify-center" onClick={(e) => e.stopPropagation()}>
-              {previews.map((url, i) => (
-                <div key={i} className="relative w-24 h-32 rounded-lg overflow-hidden border border-stone-200 group">
-                  <img src={url} alt="" className="w-full h-full object-cover" crossOrigin="anonymous" />
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPreviews(previews.filter((_, idx) => idx !== i));
-                      setImages(images.filter((_, idx) => idx !== i));
-                    }}
-                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex flex-col items-center gap-2 w-full" onClick={(e) => e.stopPropagation()}>
-              <div className="w-full max-w-sm space-y-2 mb-4 text-right">
-                <label className="text-sm font-bold text-stone-600 block">مادة الامتحان لتخصيص الذكاء الاصطناعي:</label>
-                {user.email?.toLowerCase()?.trim() === 'asmaomar5566@gmail.com' ? (
-                  <select 
-                    value={selectedSubject ?? ''}
-                    onChange={(e) => setSelectedSubject(e.target.value)}
-                    className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-stone-700"
-                  >
-                    <option value="رياضيات">رياضيات (Math)</option>
-                    <option value="أحياء">أحياء (Biology)</option>
-                    <option value="كيمياء">كيمياء (Chemistry)</option>
-                    <option value="فيزياء">فيزياء (Physics)</option>
-                    <option value="قواعد">قواعد اللغة العربية</option>
-                    <option value="إسلامية">تربية إسلامية</option>
-                    <option value="إنجليزي font-bold">لغة إنجليزية</option>
-                    <option value="عام">عام / مادة أخرى</option>
-                  </select>
-                ) : (
-                  <input 
-                    type="text"
-                    value={selectedSubject ?? ''}
-                    onChange={(e) => setSelectedSubject(e.target.value)}
-                    placeholder="مثلاً: رياضيات، أحياء..."
-                    className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-right"
-                  />
+            <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+              <HelpCircle className="w-3 h-3" />
+              بإمكانك رفع حتى 24 صفحة في المرة الواحدة لضمان سرعة المعالجة
+            </p>
+            <div className="flex flex-col items-center gap-4 w-full">
+              <div className="flex bg-stone-100 p-1.5 rounded-2xl gap-2 w-full max-w-sm">
+              <button 
+                onClick={() => setGradingMode('digital')}
+                className={cn(
+                  "flex-1 flex flex-col items-center py-3 rounded-xl transition-all gap-1",
+                  gradingMode === 'digital' 
+                    ? "bg-white text-emerald-700 shadow-sm" 
+                    : "text-stone-400 hover:text-stone-600"
                 )}
-              </div>
-
-              <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
-                <HelpCircle className="w-3 h-3" />
-                بإمكانك رفع حتى 24 صفحة في المرة الواحدة لضمان سرعة المعالجة
-              </p>
-              <div className="flex flex-col items-center gap-4 w-full" onClick={(e) => e.stopPropagation()}>
-                <div className="flex bg-stone-100 p-1.5 rounded-2xl gap-2 w-full max-w-sm">
-                  <button 
-                    onClick={() => setGradingMode('digital')}
-                    className={cn(
-                      "flex-1 flex flex-col items-center py-3 rounded-xl transition-all gap-1",
-                      gradingMode === 'digital' 
-                        ? "bg-white text-emerald-700 shadow-sm" 
-                        : "text-stone-400 hover:text-stone-600"
-                    )}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <FileText className="w-4 h-4" />
-                      <span className="font-bold text-sm">تقرير رقمي</span>
-                    </div>
-                    <span className="text-[10px] opacity-70">عرض النتائج كتقرير وجدول</span>
-                  </button>
-                  <button 
-                    onClick={() => setGradingMode('paper')}
-                    className={cn(
-                      "flex-1 flex flex-col items-center py-3 rounded-xl transition-all gap-1",
-                      gradingMode === 'paper' 
-                        ? "bg-white text-emerald-700 shadow-sm" 
-                        : "text-stone-400 hover:text-stone-600"
-                    )}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <Layers className="w-4 h-4" />
-                      <span className="font-bold text-sm">تصحيح ورقي</span>
-                    </div>
-                    <span className="text-[10px] opacity-70">وضع العلامات على صورة الورقة</span>
-                  </button>
+              >
+                <div className="flex items-center gap-1.5">
+                  <FileText className="w-4 h-4" />
+                  <span className="font-bold text-sm">تقرير رقمي</span>
                 </div>
-
-                <div className="flex justify-center gap-4 w-full">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    className="flex-1 px-4 sm:px-8 py-3 rounded-2xl border border-stone-200 font-medium hover:bg-stone-50 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span className="hidden sm:inline">اختيار الصور</span>
-                    <span className="sm:hidden text-xs">ارفع صور</span>
-                  </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
-                    className="flex-1 px-4 sm:px-8 py-3 rounded-2xl border border-stone-200 font-medium hover:bg-stone-50 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Camera className="w-4 h-4" />
-                    <span className="hidden sm:inline">فتح الكاميرا</span>
-                    <span className="sm:hidden text-xs">الكاميرا</span>
-                  </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); startGrading(); }}
-                    disabled={isGrading}
-                    className={cn(
-                      "flex-[2] px-6 sm:px-8 py-3 rounded-2xl text-white font-medium transition-colors flex items-center justify-center gap-2",
-                      images.length === 0 ? "bg-stone-400 hover:bg-stone-500 cursor-pointer" : "bg-emerald-600 hover:bg-emerald-700"
-                    )}
-                  >
-                    {isGrading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                    {isGrading && progress.total > 0 
-                      ? `${progress.phase === 'compressing' ? 'جاري ضغط الصور' : 'جاري التصحيح'} (${progress.current}/${progress.total})...` 
-                      : (gradingMode === 'paper' ? 'بدء التصحيح الورقي' : 'بدء التصحيح الذكي')}
-                  </button>
+                <span className="text-[10px] opacity-70">عرض النتائج كتقرير وجدول</span>
+              </button>
+              <button 
+                onClick={() => setGradingMode('paper')}
+                className={cn(
+                  "flex-1 flex flex-col items-center py-3 rounded-xl transition-all gap-1",
+                  gradingMode === 'paper' 
+                    ? "bg-white text-emerald-700 shadow-sm" 
+                    : "text-stone-400 hover:text-stone-600"
+                )}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Layers className="w-4 h-4" />
+                  <span className="font-bold text-sm">تصحيح ورقي</span>
                 </div>
-              </div>
+                <span className="text-[10px] opacity-70">وضع العلامات على صورة الورقة</span>
+              </button>
+            </div>
+
+            <div className="flex justify-center gap-4 w-full">
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 px-4 sm:px-8 py-3 rounded-2xl border border-stone-200 font-medium hover:bg-stone-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span className="hidden sm:inline">اختيار الصور</span>
+                <span className="sm:hidden text-xs">ارفع صور</span>
+              </button>
+              <button 
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex-1 px-4 sm:px-8 py-3 rounded-2xl border border-stone-200 font-medium hover:bg-stone-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <Camera className="w-4 h-4" />
+                <span className="hidden sm:inline">فتح الكاميرا</span>
+                <span className="sm:hidden text-xs">الكاميرا</span>
+              </button>
+              <button 
+                onClick={startGrading}
+                disabled={images.length === 0 || isGrading}
+                className="flex-[2] px-6 sm:px-8 py-3 rounded-2xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isGrading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+                {isGrading && progress.total > 0 
+                  ? `${progress.phase === 'compressing' ? 'جاري ضغط الصور' : 'جاري التصحيح'} (${progress.current}/${progress.total})...` 
+                  : (gradingMode === 'paper' ? 'بدء التصحيح الورقي' : 'بدء التصحيح الذكي')}
+              </button>
             </div>
           </div>
-        )
+        </div>
+      </div>
       ) : (
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -4058,68 +3369,6 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
               </div>
             ) : (
               <div className="space-y-8">
-                {/* لوحة أدوات التصحيح السريع */}
-                <div className="bg-stone-50 border border-stone-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                      <Settings className="w-5 h-5 animate-pulse" />
-                    </div>
-                    <div className="text-right">
-                      <h4 className="font-bold text-stone-800 text-sm">لوحة تصحيح الأوراق السريعة</h4>
-                      <p className="text-stone-400 text-[11px]">عند النقر على الورقة، سيتم رصد تفاعلك تلقائياً. اضغط على أي علامة لفتح قائمة تعديل درجتها يدوياً.</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    {/* زر تمكين / تعطيل التصحيح السريع */}
-                    <button
-                      type="button"
-                      onClick={() => setQuickGradingActive(!quickGradingActive)}
-                      className={cn(
-                        "px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5",
-                        quickGradingActive
-                          ? "bg-emerald-500 border-emerald-500 text-white shadow-sm shadow-emerald-500/10"
-                          : "bg-white border-stone-200 hover:bg-stone-50 text-stone-500"
-                      )}
-                    >
-                      <span className={cn("w-2 h-2 rounded-full lg:inline-block", quickGradingActive ? "bg-white animate-pulse" : "bg-stone-300")} />
-                      {quickGradingActive ? "التصحيح السريع: نشط" : "التصحيح السريع: غير نشط"}
-                    </button>
-
-                    {/* زر قلم صح أو قلم خطأ عند تفعيل التصحيح السريع */}
-                    {quickGradingActive && (
-                      <div className="flex bg-white p-1 rounded-xl border border-stone-200 gap-1 shadow-sm">
-                        <button
-                          type="button"
-                          onClick={() => setActivePen('correct')}
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1",
-                            activePen === 'correct'
-                              ? "bg-emerald-50 text-emerald-700 font-extrabold border border-emerald-100"
-                              : "text-stone-400 hover:text-stone-600 border border-transparent"
-                          )}
-                        >
-                          <span className="font-sans">✓</span>
-                          <span>قلم صح (١ د)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActivePen('incorrect')}
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1",
-                            activePen === 'incorrect'
-                              ? "bg-rose-50 text-rose-700 font-extrabold border border-rose-100"
-                              : "text-stone-400 hover:text-stone-600 border border-transparent"
-                          )}
-                        >
-                          <span className="font-sans">×</span>
-                          <span>قلم خطأ (٠ د)</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
                 {Array.from(new Set(currentGrading.gradings.map((g: any) => g.pageIndex)))
                   .filter((idx): idx is number => idx !== undefined && idx !== null)
                   .sort((a, b) => a - b)
@@ -4132,20 +3381,25 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
                       <VisualPaperOverlay 
                         imageUrl={previews[pageIdx]}
                         gradings={currentGrading.gradings.filter((g: any) => g.pageIndex === pageIdx)}
-                        allGradings={currentGrading.gradings}
-                        pageIndex={pageIdx}
-                        quickGradingActive={quickGradingActive}
-                        activePen={activePen}
-                        onGradingsChange={(newGradings: any[]) => {
-                          const newTotal = calculateGradingTotal(newGradings);
-                          const newResults = [...gradingResults];
-                          newResults[currentResultIndex] = { ...currentGrading, gradings: newGradings, totalGrade: newTotal };
-                          setGradingResults(newResults);
-                        }}
                         studentName={currentGrading.studentName}
                         totalGrade={currentGrading.totalGrade}
                         maxGrade={exam.totalGrade}
                         isFirstPage={i === 0}
+                        onAddMark={(box: [number, number, number, number]) => {
+                          const newGrading = {
+                            questionId: `manual_${Date.now()}`,
+                            studentAnswer: 'تأشير يدوي',
+                            grade: 1, // Default grade
+                            feedback: 'تمت الإضافة يدوياً',
+                            box,
+                            pageIndex: pageIdx
+                          };
+                          const newGradings = [...currentGrading.gradings, newGrading];
+                          const newTotal = newGradings.reduce((acc: any, curr: any) => acc + curr.grade, 0);
+                          const newResults = [...gradingResults];
+                          newResults[currentResultIndex] = { ...currentGrading, gradings: newGradings, totalGrade: newTotal };
+                          setGradingResults(newResults);
+                        }}
                       />
                     </div>
                   ))
@@ -4298,7 +3552,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-stone-700 block mr-1">إضافة إلى مجلد موجود:</label>
                           <select 
-                            value={targetSessionId ?? ''}
+                            value={targetSessionId}
                             onChange={(e) => setTargetSessionId(e.target.value)}
                             className="w-full p-4 rounded-2xl border border-stone-200 bg-stone-50 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                           >
@@ -4315,7 +3569,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
                           <label className="text-sm font-bold text-stone-700 block mr-1">اسم المجلد الجديد:</label>
                           <input 
                             type="text"
-                            value={newSessionName ?? ''}
+                            value={newSessionName}
                             onChange={(e) => setNewSessionName(e.target.value)}
                             placeholder="مثلاً: تصحيح الشهر الأول"
                             className="w-full p-4 rounded-2xl border border-stone-200 bg-stone-50 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
@@ -4743,7 +3997,7 @@ function ResultsView({ results, sessions, exams, onBack }: any) {
         <div className="flex items-center gap-3">
           <Calendar className="w-5 h-5 text-stone-400" />
           <select 
-            value={selectedYear ?? 'all'} 
+            value={selectedYear} 
             onChange={(e) => setSelectedYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
             className="bg-stone-50 px-4 py-2 rounded-xl border border-stone-200 outline-none text-sm"
           >
@@ -4751,7 +4005,7 @@ function ResultsView({ results, sessions, exams, onBack }: any) {
             {years.map((y: any) => <option key={y} value={y}>{y}</option>)}
           </select>
           <select 
-            value={selectedMonth ?? 'all'} 
+            value={selectedMonth} 
             onChange={(e) => setSelectedMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}
             className="bg-stone-50 px-4 py-2 rounded-xl border border-stone-200 outline-none text-sm"
           >
@@ -4818,676 +4072,3 @@ function ResultsView({ results, sessions, exams, onBack }: any) {
     </motion.div>
   );
 }
-
-// -----------------------------------------------------------------
-// COMPONENT: MathDirectGrader (Direct Mathematical Visual Grading)
-// -----------------------------------------------------------------
-function MathDirectGrader({ user, userProfile, onCancel }: { user: any; userProfile: any; onCancel: () => void }) {
-  const [examSheets, setExamSheets] = useState<File[]>([]);
-  const [examPreviews, setExamPreviews] = useState<string[]>([]);
-  const [studentPapers, setStudentPapers] = useState<File[]>([]);
-  const [studentPreviews, setStudentPreviews] = useState<string[]>([]);
-  const [totalGrade, setTotalGrade] = useState<number>(100);
-  
-  const [isGrading, setIsGrading] = useState<boolean>(false);
-  const [progress, setProgress] = useState<{ current: number; total: number; phase: string }>({ current: 0, total: 0, phase: '' });
-  const [activeLogs, setActiveLogs] = useState<string[]>([]);
-  const consoleRef = useRef<HTMLDivElement>(null);
-
-  const [results, setResults] = useState<any[]>([]);
-  const [selectedStudentIdx, setSelectedStudentIdx] = useState<number>(0);
-  const [showSaveModal, setShowSaveModal] = useState<boolean>(false);
-  const [sessionName, setSessionName] = useState<string>('');
-  const [isSaving, setIsSaving] = useState<boolean>(false);
-
-  const examInputRef = useRef<HTMLInputElement>(null);
-  const studentInputRef = useRef<HTMLInputElement>(null);
-
-  // Auto scroll console logs
-  useEffect(() => {
-    if (consoleRef.current) {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-    }
-  }, [activeLogs]);
-
-  // Set up progress logs
-  useEffect(() => {
-    if (!isGrading) return;
-
-    if (progress.phase === 'compressing') {
-      setActiveLogs([
-        "⏳ جاري استقبال الصور ومعالجتها...",
-        `📁 تم رصد عدد ${examSheets.length} صور لأوراق الأسئلة.`,
-        `📁 تم رصد عدد ${studentPapers.length} صور لأجوبة الطلاب.`,
-        "🛠️ جاري تقليص وضغط أحجام الصور لضمان سرعة الرفع وحفظ النطاق الترددي..."
-      ]);
-    } else if (progress.phase === 'grading') {
-      const logs = [
-        "🌐 جاري تهيئة الاتصال الذكي المشفر بالكامل مع خوادم Kimi (Moonshot AI)...",
-        "📐 البدء في الفحص واستخراج المسائل الحسابية والمعادلات من ورقة الأسئلة...",
-        "✍️ جاري حل المسائل ذاتياً وتوليد الحلول الرياضية والمخرجات النموذجية للدرجات...",
-        "🔎 جاري فحص خط يد الطالب على الأوراق المرفوعة بطريقة التعرف البصري المباشر (Direct OCR)...",
-        "🎯 مطابقة الإجابات المكتوبة بخط اليد مع الحلول الرياضية الفصحى التي جرى حسابها...",
-        "⚖️ تقييم الفروقات وتطبيق القواعد الحسابية والدرجات بدقة متناهية...",
-        "📝 صياغة ملخصات التقييم والملاحظات التربوية البليغة باللغة العربية الفصحى..."
-      ];
-
-      setActiveLogs(prev => [
-        ...prev,
-        "✅ تم ضغط الصور وتجهيزها للاستعلام البصري بنجاح.",
-        "🚀 جاري استقطاب معلم الرياضيات والبدء بالتصحيح الاسترشادي المباشر..."
-      ]);
-
-      let idx = 0;
-      const interval = setInterval(() => {
-        if (idx < logs.length) {
-          setActiveLogs(prev => [...prev, logs[idx]]);
-          idx++;
-        } else {
-          clearInterval(interval);
-        }
-      }, 2400);
-
-      return () => clearInterval(interval);
-    }
-  }, [isGrading, progress.phase]);
-
-  // Default Session Name based on Arabic date format
-  useEffect(() => {
-    const d = new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
-    setSessionName(`تصحيح رياضيات مباشر - ${d}`);
-  }, []);
-
-  const handleExamUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files);
-      setExamSheets([...examSheets, ...files]);
-      const prevs = files.map(f => URL.createObjectURL(f));
-      setExamPreviews([...examPreviews, ...prevs]);
-    }
-  };
-
-  const handleStudentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files);
-      setStudentPapers([...studentPapers, ...files]);
-      const prevs = files.map(f => URL.createObjectURL(f));
-      setStudentPreviews([...studentPreviews, ...prevs]);
-    }
-  };
-
-  const handleRemoveExamImg = (idx: number) => {
-    const updatedSheets = [...examSheets];
-    updatedSheets.splice(idx, 1);
-    setExamSheets(updatedSheets);
-
-    const updatedPrevs = [...examPreviews];
-    URL.revokeObjectURL(updatedPrevs[idx]);
-    updatedPrevs.splice(idx, 1);
-    setExamPreviews(updatedPrevs);
-  };
-
-  const handleRemoveStudentImg = (idx: number) => {
-    const updatedPapers = [...studentPapers];
-    updatedPapers.splice(idx, 1);
-    setStudentPapers(updatedPapers);
-
-    const updatedPrevs = [...studentPreviews];
-    URL.revokeObjectURL(updatedPrevs[idx]);
-    updatedPrevs.splice(idx, 1);
-    setStudentPreviews(updatedPrevs);
-  };
-
-  const triggerStartGrading = async () => {
-    if (examPreviews.length === 0) {
-      alert("يرجى رفع صورة ورقة الأسئلة للبدء");
-      return;
-    }
-    if (studentPreviews.length === 0) {
-      alert("يرجى رفع صور إجابات وأوراق الطلاب للبدء");
-      return;
-    }
-
-    setIsGrading(true);
-    setProgress({ current: 0, total: examPreviews.length + studentPreviews.length, phase: 'compressing' });
-    
-    try {
-      const response = await gradeMathDirect(
-        examPreviews,
-        studentPreviews,
-        totalGrade,
-        (curr, tot, ph) => setProgress({ current: curr, total: tot, phase: ph })
-      );
-
-      if (!response.results || response.results.length === 0) {
-        throw new Error("لم ترجع خوادم الجريدر نتائج أو لا توجد أسئلة مقروءة بوضوح في الصور.");
-      }
-
-      setResults(response.results);
-      setSelectedStudentIdx(0);
-      
-      // Update page limit stats if user is approved
-      if (userProfile) {
-        try {
-          await updateDoc(doc(db, 'users', user.uid), {
-            pagesUsed: increment(examSheets.length + studentPapers.length),
-            gradingsCount: increment(response.results.length)
-          });
-        } catch (dbErr) {
-          console.error("Failed to update stats in Firestore:", dbErr);
-        }
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert(`عذراً، حدث خطأ أثناء التصحيح المباشر: ${err.message || err}`);
-    } finally {
-      setIsGrading(false);
-    }
-  };
-
-  // Adjust specific student grade directly in client
-  const handleScoreChange = (qIdx: number, val: number) => {
-    const updated = [...results];
-    const student = updated[selectedStudentIdx];
-    const item = student.gradings[qIdx];
-    item.grade = Number(val);
-    
-    // Recompute total grade
-    student.totalGrade = student.gradings.reduce((sum: number, g: any) => sum + (g.grade || 0), 0);
-    setResults(updated);
-  };
-
-  // Adjust specific student feedback directly in client
-  const handleFeedbackChange = (qIdx: number, val: string) => {
-    const updated = [...results];
-    const student = updated[selectedStudentIdx];
-    const item = student.gradings[qIdx];
-    item.feedback = val;
-    setResults(updated);
-  };
-
-  // Save math grading results to Firestore
-  const handleSaveToFirestore = async () => {
-    if (!sessionName.trim()) {
-      alert("يرجى إدخال اسم مجلد الحفظ أولاً.");
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      // Create session doc
-      const sessionRef = await addDoc(collection(db, 'sessions'), {
-        examId: 'math-direct',
-        examTitle: 'تصحيح رياضيات مباشر (بدون نموذج)',
-        sessionName: sessionName,
-        authorUid: user.uid,
-        studentCount: results.length,
-        createdAt: serverTimestamp()
-      });
-
-      // Save student results
-      for (const res of results) {
-        await addDoc(collection(db, 'results'), removeUndefinedFields({
-          studentName: res.studentName && res.studentName.trim() ? res.studentName.trim() : "طالب بدون اسم",
-          gradings: res.gradings.map((g: any, qIdx: number) => ({
-            questionId: g.questionId || `q_${qIdx + 1}`,
-            questionLabel: g.questionLabel || `سؤال ${qIdx + 1}`,
-            questionText: g.questionText || '',
-            correctAnswer: g.correctAnswer || '',
-            studentAnswer: g.studentAnswer || '',
-            grade: g.grade || 0,
-            maxGrade: g.maxGrade || 0,
-            feedback: g.feedback || '',
-            box: g.box || null,
-            pageIndex: g.pageIndex || 0
-          })),
-          totalGrade: res.totalGrade,
-          maxGrade: res.maxGrade || totalGrade,
-          sessionId: sessionRef.id,
-          examId: 'math-direct',
-          examTitle: 'تصحيح رياضيات مباشر (بدون نموذج)',
-          authorUid: user.uid,
-          createdAt: serverTimestamp()
-        }));
-      }
-
-      setShowSaveModal(false);
-      alert("تم حفظ نتائج التصحيح المباشر بنجاح في أرشيف النتائج!");
-      onCancel(); // Back to dashboard
-    } catch (err: any) {
-      console.error(err);
-      alert(`خطأ أثناء الحفظ: ${err.message || err}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Print results
-  const triggerPrintResults = () => {
-    window.print();
-  };
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="space-y-8"
-      dir="rtl"
-    >
-      {/* Header */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-stone-200">
-        <div className="space-y-1 text-center md:text-right">
-          <h2 className="text-2xl md:text-3xl font-bold font-serif italic text-sky-950 flex items-center gap-2 justify-center md:justify-start">
-            <span>التصحيح المباشر والسريع لدفاتر الرياضيات 📐</span>
-          </h2>
-          <p className="text-sm text-stone-500">
-            أداة فورية لحل وتصحيح الرياضيات دون الحاجة لإدخال نموذج إجابات يدوي. ارفع صورة الأسئلة مع أوراق الطلاب ودع الذكاء الاصطناعي يقوم بالمطابقة والدرجات بلمح البصر!
-          </p>
-        </div>
-        <button 
-          id="btn-cancel-grade-math"
-          onClick={onCancel}
-          className="bg-stone-100 hover:bg-stone-200 text-stone-700 px-6 py-2.5 rounded-xl font-bold transition-all shrink-0 w-full md:w-auto"
-        >
-          رجوع للرئيسية
-        </button>
-      </div>
-
-      {results.length === 0 ? (
-        <>
-          {/* Main Upload Workflow */}
-          {!isGrading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Question Sheets Upload */}
-              <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-                  <h3 className="font-bold text-lg text-stone-800 flex items-center gap-1.5">
-                    <span className="w-2 h-5 bg-sky-600 rounded-full inline-block" />
-                    1. صورة ورقة الأسئلة الرسمية
-                  </h3>
-                  <span className="text-xs text-sky-600 font-bold bg-sky-50 px-2.5 py-1 rounded-lg">إلزامي لحساب الحلول</span>
-                </div>
-                
-                <div 
-                  id="zone-upload-questions"
-                  onClick={() => examInputRef.current?.click()}
-                  className="border-2 border-dashed border-sky-200 rounded-2xl p-8 hover:border-sky-500 hover:bg-sky-50/20 transition-all text-center cursor-pointer space-y-3"
-                >
-                  <FileText className="w-10 h-10 text-sky-600 mx-auto" />
-                  <div className="space-y-1">
-                    <p className="font-bold text-stone-700">اضغط لرفع ورقة الأسئلة</p>
-                    <p className="text-xs text-stone-400">يدعم رفع ملفات الصور بصيغة JPG أو PNG</p>
-                  </div>
-                  <input 
-                    type="file" 
-                    ref={examInputRef} 
-                    onChange={handleExamUpload} 
-                    multiple 
-                    className="hidden" 
-                    accept="image/*"
-                  />
-                </div>
-
-                {examPreviews.length > 0 && (
-                  <div className="grid grid-cols-3 gap-3 pt-3">
-                    {examPreviews.map((p, idx) => (
-                      <div key={idx} className="relative group rounded-xl border border-stone-200 overflow-hidden bg-stone-50 h-24">
-                        <img src={p} alt="" className="w-full h-full object-cover" />
-                        <button 
-                          onClick={() => handleRemoveExamImg(idx)}
-                          className="absolute top-1 right-1 p-1 bg-red-650 hover:bg-red-700 text-white rounded-full transition-colors bg-red-600"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                        <span className="absolute bottom-1 left-1 bg-stone-900/70 text-white text-[9px] px-1.5 py-0.5 rounded">صفحة {idx+1}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Student Papers Upload */}
-              <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-                  <h3 className="font-bold text-lg text-stone-800 flex items-center gap-1.5">
-                    <span className="w-2 h-5 bg-emerald-600 rounded-full inline-block" />
-                    2. أوراق إجابات الطلاب (بخط اليد)
-                  </h3>
-                  <span className="text-xs text-emerald-600 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg">صور لأعمال ودفاتر الطلاب</span>
-                </div>
-                
-                <div 
-                  id="zone-upload-student-papers"
-                  onClick={() => studentInputRef.current?.click()}
-                  className="border-2 border-dashed border-emerald-200 rounded-2xl p-8 hover:border-emerald-500 hover:bg-emerald-50/20 transition-all text-center cursor-pointer space-y-3"
-                >
-                  <FileUp className="w-10 h-10 text-emerald-600 mx-auto" />
-                  <div className="space-y-1">
-                    <p className="font-bold text-stone-700">اضغط لرفع أوراق دفاتر الطلاب</p>
-                    <p className="text-xs text-stone-400">يمكنك رفع عدة دفاتر في وقت واحد لمجموعة الطلاب</p>
-                  </div>
-                  <input 
-                    type="file" 
-                    ref={studentInputRef} 
-                    onChange={handleStudentUpload} 
-                    multiple 
-                    className="hidden" 
-                    accept="image/*"
-                  />
-                </div>
-
-                {studentPreviews.length > 0 && (
-                  <div className="grid grid-cols-4 gap-2 pt-3">
-                    {studentPreviews.map((p, idx) => (
-                      <div key={idx} className="relative group rounded-xl border border-stone-200 overflow-hidden bg-stone-50 h-20">
-                        <img src={p} alt="" className="w-full h-full object-cover" />
-                        <button 
-                          onClick={() => handleRemoveStudentImg(idx)}
-                          className="absolute top-1 right-1 p-1 bg-red-650 hover:bg-red-700 text-white rounded-full transition-colors bg-red-600"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                        <span className="absolute bottom-1 left-1 bg-stone-900/70 text-white text-[8px] px-1 rounded">ورقة {idx+1}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Total Grade & Go button */}
-              <div className="col-span-full bg-stone-50 p-6 rounded-3xl border border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-6">
-                <div className="flex flex-col gap-2 w-full sm:w-auto">
-                  <label className="font-bold text-sm text-stone-700">الدرجة الكلية للامتحان الحسابي:</label>
-                  <div className="flex items-center gap-3">
-                    <input 
-                      type="number" 
-                      value={totalGrade} 
-                      onChange={(e) => setTotalGrade(Math.max(1, Number(e.target.value)))}
-                      className="bg-white border border-stone-300 w-28 px-4 py-2 rounded-xl text-center font-bold text-stone-800"
-                    />
-                    <span className="text-stone-400 text-xs">درجة (موزعة بالتناسب على كافة المسائل المكتشفة)</span>
-                  </div>
-                </div>
-
-                <button
-                  id="btn-trigger-grading-math"
-                  onClick={triggerStartGrading}
-                  className="bg-sky-600 text-white px-8 py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-sky-700 transition-colors shadow-lg shadow-sky-600/30 w-full sm:w-auto shrink-0"
-                >
-                  <CheckSquare className="w-5 h-5 text-sky-200" />
-                  بدء التصحيح الرياضي الذكي والفوري ⚡
-                </button>
-              </div>
-
-            </div>
-          ) : (
-            /* Live Progress Visuals & Log Console */
-            <div className="bg-stone-900 text-white p-8 rounded-3xl border border-stone-850 shadow-2xl space-y-6 max-w-3xl mx-auto text-right">
-              <div className="flex flex-col items-center text-center space-y-4">
-                <Loader2 className="w-12 h-12 text-sky-500 animate-spin" />
-                <div className="space-y-1">
-                  <h3 className="font-bold text-xl">جاري استدعاء المصحح الآلي...</h3>
-                  <p className="text-xs text-stone-400">يقوم الذكاء الاصطناعي الآن بقراءة المسائل وحلها وتطبيق التصحيح المباشر على الأوراق</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-bold text-stone-400">
-                  <span>جاري المعالجة...</span>
-                  <span className="font-mono">{Math.round((progress.current / (progress.total || 1)) * 100)}%</span>
-                </div>
-                <div className="w-full bg-stone-800 h-2.5 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-sky-500 transition-all duration-300"
-                    style={{ width: `${(progress.current / (progress.total || 1)) * 100}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Premium Console Log Panel */}
-              <div className="space-y-2">
-                <span className="text-xs text-stone-500 uppercase tracking-wider font-bold">شاشة تتبع العمليات البصرية:</span>
-                <div 
-                  ref={consoleRef}
-                  className="bg-black/60 border border-stone-800 p-4 rounded-xl font-mono text-[11px] text-emerald-400 h-48 overflow-y-auto space-y-1.5 text-right font-sans"
-                >
-                  {activeLogs.map((log, lIdx) => (
-                    <div key={lIdx} className="fade-in">
-                      {log}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        /* Results View dashboard */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* List of graded students (Left Panel) */}
-          <div className="lg:col-span-4 bg-white p-6 rounded-3xl border border-stone-200 h-fit space-y-4">
-            <h3 className="font-bold text-stone-700 text-sm border-b border-stone-100 pb-2.5">الطلاب المصححين:</h3>
-            <div className="space-y-2">
-              {results.map((r, rIdx) => {
-                const percentage = Math.round((r.totalGrade / (r.maxGrade || totalGrade)) * 100);
-                return (
-                  <button 
-                    key={rIdx}
-                    onClick={() => setSelectedStudentIdx(rIdx)}
-                    className={cn(
-                      "w-full text-right p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 font-sans",
-                      selectedStudentIdx === rIdx 
-                        ? "border-sky-500 bg-sky-50/50 text-sky-900 font-bold shadow-sm" 
-                        : "border-stone-200 hover:bg-stone-50 text-stone-750"
-                    )}
-                  >
-                    <div className="flex flex-col text-right">
-                      <span className="text-sm">{r.studentName || `طالب #${rIdx + 1}`}</span>
-                      <span className="text-[10px] text-stone-400 font-bold font-mono">
-                        نسبة النجاح: {percentage}%
-                      </span>
-                    </div>
-                    <div className={cn(
-                      "text-sm font-black px-3 py-1.5 rounded-xl font-mono",
-                      percentage >= 50 ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
-                    )}>
-                      {r.totalGrade} / {r.maxGrade || totalGrade}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="pt-4 border-t border-stone-100 space-y-3">
-              <button 
-                onClick={() => setShowSaveModal(true)}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/10"
-              >
-                <Save className="w-5 h-5 text-emerald-200" />
-                حفظ النتائج للأرشيف
-              </button>
-              <button 
-                onClick={triggerPrintResults}
-                className="w-full bg-stone-900 hover:bg-stone-800 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-sm"
-              >
-                <Printer className="w-5 h-5 text-stone-400" />
-                طباعة تقارير الطلاب
-              </button>
-              <button 
-                onClick={() => {
-                  if (confirm("هل تعيد عملية التصحيح وتلغي هذه الأوراق؟")) {
-                    setResults([]);
-                  }
-                }}
-                className="w-full bg-stone-100 hover:bg-red-50 hover:text-red-600 text-stone-600 py-3 rounded-2xl text-xs font-semibold"
-              >
-                إلغاء وإعادة التصحيح
-              </button>
-            </div>
-          </div>
-
-          {/* Graded solutions details (Right Panel) */}
-          <div className="lg:col-span-8 space-y-6">
-            <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-6">
-              
-              {/* Student Header */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-stone-100 pb-4">
-                <div>
-                  <h4 className="text-xl font-bold text-stone-850">
-                    تقرير درجات الطالب: <span className="text-sky-600">{results[selectedStudentIdx]?.studentName || "أعمال الطالب"}</span>
-                  </h4>
-                  <p className="text-xs text-stone-400 mt-1">كافة التفاصيل مستخرجة ذاتياً ومطابقة بذكاء اصطناعي فائق الدقة</p>
-                </div>
-
-                <div className="flex items-center gap-3 bg-stone-50 px-4 py-2.5 rounded-2xl border border-stone-200 font-mono">
-                  <div className="text-right">
-                    <span className="text-[9px] text-stone-400 uppercase font-bold block">مجموع الدرجة:</span>
-                    <span className="text-lg font-black text-stone-800">
-                      {results[selectedStudentIdx]?.totalGrade} / {results[selectedStudentIdx]?.maxGrade || totalGrade}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Questions List */}
-              <div className="space-y-6">
-                {results[selectedStudentIdx]?.gradings.map((g: any, qIdx: number) => {
-                  const isCorrect = g.grade > 0;
-                  return (
-                    <div 
-                      key={qIdx}
-                      className={cn(
-                        "p-5 rounded-2xl border transition-all space-y-4 text-right shadow-sm",
-                        isCorrect 
-                          ? "border-emerald-200 bg-emerald-50/10" 
-                          : "border-red-200 bg-red-50/10"
-                      )}
-                    >
-                      {/* Question Label & Grade score */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-stone-150 pb-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className={cn("w-5 h-5", isCorrect ? "text-emerald-600" : "text-red-500")} />
-                          <span className="font-bold text-[15px] text-stone-900">
-                            {g.questionLabel || `سؤال ${qIdx + 1}`}
-                          </span>
-                        </div>
-                        
-                        {/* Interactive Marks custom adjustments */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-stone-400 font-bold">الدرجة:</span>
-                          <input 
-                            type="number" 
-                            value={g.grade}
-                            onChange={(e) => handleScoreChange(qIdx, Math.min(g.maxGrade || 20, Math.max(0, Number(e.target.value))))}
-                            className="bg-white border border-stone-200 rounded-lg w-16 p-1 text-center font-bold text-stone-800"
-                            max={g.maxGrade}
-                            min={0}
-                          />
-                          <span className="text-stone-400 text-xs">/ {g.maxGrade || 25}</span>
-                        </div>
-                      </div>
-
-                      {/* Mathematical formula of the question */}
-                      {g.questionText && (
-                        <div className="p-3 bg-white/70 border border-stone-100 rounded-xl">
-                          <span className="text-[10px] text-stone-400 block font-bold">صيغة المسألة الحسابية المستخرجة:</span>
-                          <span className="font-mono text-sm inline-block text-stone-700 font-bold" dir="ltr">
-                            {g.questionText}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Solution vs. student answer side by side */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="p-3 bg-sky-50 rounded-xl border border-sky-100 text-right">
-                          <span className="text-[9px] text-sky-800 block font-bold">النظام الذكي (الناتج ومسار الحل):</span>
-                          <span className="font-mono text-sm text-sky-950 font-bold inline-block" dir="ltr">
-                            {g.correctAnswer}
-                          </span>
-                        </div>
-
-                        <div className="p-3 bg-stone-50 rounded-xl border border-stone-150 text-right">
-                          <span className="text-[9px] text-stone-400 block font-bold">خط الطالب المكتشف بالحبر:</span>
-                          <span className="font-mono text-sm text-stone-800 font-black inline-block" dir="ltr">
-                            {g.studentAnswer || "لم يحل / فارغ"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Editable Feedback */}
-                      <div className="space-y-1.5">
-                        <span className="text-[10px] text-stone-400 font-bold block">ملاحظات المعلم وتقييم السؤال:</span>
-                        <input 
-                          type="text" 
-                          value={g.feedback}
-                          onChange={(e) => handleFeedbackChange(qIdx, e.target.value)}
-                          className="bg-white border border-stone-200 rounded-xl p-2.5 w-full text-xs text-stone-800 outline-none focus:border-sky-500 transition-colors"
-                          placeholder="مثال: إجابة نموذجية، أحسنت!"
-                        />
-                      </div>
-
-                    </div>
-                  );
-                })}
-              </div>
-
-            </div>
-          </div>
-
-        </div>
-      )}
-
-      {/* Save Modal */}
-      {showSaveModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-stone-200 shadow-2xl space-y-4 text-right">
-            <h4 className="text-lg font-bold text-stone-900 border-b border-stone-100 pb-2.5">
-              💾 حفظ المجلد الحالي إلى التقارير
-            </h4>
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-stone-400">اسم مجلد التقرير:</label>
-                <input 
-                  type="text" 
-                  value={sessionName}
-                  onChange={(e) => setSessionName(e.target.value)}
-                  className="bg-stone-50 border border-stone-200 p-3 rounded-xl w-full text-sm text-stone-750 font-medium outline-none focus:border-emerald-500"
-                  placeholder="مثال: تصحيح الرياضيات الفصلي"
-                />
-              </div>
-
-              <div className="bg-stone-50 p-3 rounded-xl border border-stone-100 space-y-1 text-xs text-stone-500 leading-relaxed">
-                <p>💡 يحفظ هذا المجلد كافة دفاتر الطلاب والدرجات المستحقة مع الحلول الذكية!</p>
-                <p>ستظهر النتائج تلقائياً في خانة <strong>النتائج (الأرشيف)</strong> في الشاشة الرئيسية فور الانتهاء.</p>
-              </div>
-
-              <div className="flex items-center gap-3 pt-2">
-                <button 
-                  id="btn-confirm-save-math"
-                  onClick={handleSaveToFirestore}
-                  disabled={isSaving}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl shadow-sm text-sm"
-                >
-                  {isSaving ? "جاري الحفظ..." : "تأكيد الحفظ"}
-                </button>
-                <button 
-                  id="btn-cancel-save-math"
-                  onClick={() => setShowSaveModal(false)}
-                  disabled={isSaving}
-                  className="flex-1 bg-stone-150 hover:bg-stone-200 text-stone-700 font-bold py-3 rounded-xl text-sm bg-stone-100"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </motion.div>
-  );
-}
-

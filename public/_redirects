@@ -1,4 +1,0 @@
-# Cloudflare Pages SPA fallback
-# All client-side routes return index.html (200), except /api/* which goes to Pages Functions.
-/api/*  /api/:splat  200
-/*      /index.html  200
