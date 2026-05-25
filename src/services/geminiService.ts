@@ -23,27 +23,20 @@ export interface GradingResult {
   pageIndex?: number;
 }
 
-// Initialize AI on client side as per instructions
 const getApiKey = () => {
-  // Try various common environment variable patterns for Vite/Netlify
   const viteKey = import.meta.env?.VITE_GEMINI_API_KEY;
   if (viteKey && viteKey !== 'undefined' && viteKey !== '') return viteKey.trim();
-
-  // Fallback to process.env if available (usually during dev or if polyfilled)
   try {
     const envKey = process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY;
     if (envKey && envKey !== 'undefined' && envKey !== '') return envKey.trim();
-  } catch (e) {
-    // process might not be defined in browser
-  }
-  
+  } catch (e) {}
   return (localStorage.getItem('GEMINI_API_KEY_FALLBACK') || '').trim();
 };
 
 const getApiKeyErrorMessage = () => {
   const isNetlify = window.location.hostname.includes('netlify.app');
   if (isNetlify) {
-    return 'مفتاح API غير مضبوط. إذا كنت تستخدم Netlify، تأكد من إضافة المفتاح باسم VITE_GEMINI_API_KEY في إعدادات البيئة (Environment Variables). يمكنك أيضاً إدخاله يدوياً من أيقونة الإعدادات (⚙️) في الأعلى.';
+    return 'مفتاح API غير مضبوط. إذا كنت تستخدم Netlify، تأكد من إضافة المفتاح باسم VITE_GEMINI_API_KEY في إعدادات البيئة. يمكنك أيضاً إدخاله يدوياً من أيقونة الإعدادات (⚙️) في الأعلى.';
   }
   return 'مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.';
 };
@@ -79,9 +72,9 @@ export async function extractExamFromDualImages(
     CRITICAL: 
     - Preserve Arabic digits (٠-٩).
     - For sub-questions (e.g. branch A, B, or numbers 1, 2), nest them inside the parent question.
-    - GRADE EXTRACTION: Strictly copy the grade written on the paper. DO NOT divide the parent grade among sub-questions yourself. If sub-questions don't have individual grades on the paper, leave their 'grade' field null or empty.
-    - IMPORTANT: Clean the 'text' field by removing redundant identifiers (like "س1:", "أ-", "1-") at the beginning of the text IF they are already represented by the structure.
-    - If a question has sub-questions, the parent 'text' should be the general instruction only. 
+    - GRADE EXTRACTION: Strictly copy the grade written on the paper. DO NOT divide the parent grade among sub-questions yourself.
+    - Clean the 'text' field by removing redundant identifiers (like "س1:", "أ-", "1-") if already represented by structure.
+    - If a question has sub-questions, the parent 'text' should be the general instruction only.
     - If images are text-only, extract the full text.`;
 
     const parts: any[] = [];
@@ -94,7 +87,7 @@ export async function extractExamFromDualImages(
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: { parts },
-      config: { 
+      config: {
         responseMimeType: "application/json",
         temperature: 0.1,
         systemInstruction: "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown."
@@ -102,7 +95,6 @@ export async function extractExamFromDualImages(
     });
 
     const data = JSON.parse(cleanJson(response.text || '{}'));
-
     if (data && Array.isArray(data.questions)) {
       data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
     }
@@ -133,7 +125,7 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     - Preserve Arabic digits (٠-٩). 
     - Nest sub-questions properly.
     - GRADE EXTRACTION: Strictly copy original grades. DO NOT invent or divide grades for sub-questions.
-    - IMPORTANT: Clean the 'text' field by removing redundant identifiers (like "س1:", "أ-", "1-") at the beginning of the text IF they are already represented by the structure.
+    - Clean the 'text' field by removing redundant identifiers if already represented by structure.
     - If a question has sub-questions, the parent 'text' should be the general instruction only.`;
 
     const parts: any[] = imagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
@@ -142,7 +134,7 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: { parts },
-      config: { 
+      config: {
         responseMimeType: "application/json",
         temperature: 0.1,
         systemInstruction: "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears."
@@ -150,7 +142,6 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     });
 
     const data = JSON.parse(cleanJson(response.text || '{}'));
-
     if (data && Array.isArray(data.questions)) {
       data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
     }
@@ -175,7 +166,7 @@ export async function gradeStudentPaper(
     const ai = new GoogleGenAI({ apiKey });
 
     if (onProgress) onProgress(0, imageUrls.length, 'compressing');
-    
+
     const base64ImagesData: string[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
       const compressed = await compressImage(imageUrls[i], 2000, 2000, 0.85);
@@ -190,7 +181,6 @@ export async function gradeStudentPaper(
         if (label.length > 15 || label.length === 0) label = `سؤال ${index + 1}`;
         const fullPath = path ? `${path} / ${label}` : label;
         const combinedText = parentText ? `${parentText} - ${q.text}` : q.text;
-        
         if (!q.subQuestions || q.subQuestions.length === 0) {
           flattenedQuestions.push({ id: q.id, label: fullPath, text: combinedText, answer: q.answer, grade: q.grade, type: q.type });
         } else {
@@ -203,110 +193,90 @@ export async function gradeStudentPaper(
     if (onProgress) onProgress(0, 100, 'grading');
 
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
-    const imageParts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
 
-    // ─────────────────────────────────────────────────────────────
-    // CALL 1 — READ ONLY
-    // The model sees images + question labels ONLY (no expected answers).
-    // Its only job is to copy what the student physically wrote.
-    // ─────────────────────────────────────────────────────────────
-    const questionLabels = flattenedQuestions.map(q => ({ id: q.id, label: q.label }));
+    const prompt = `You are a forensic document analyst and evaluator. Your task has two phases that must never bleed into each other.
 
-    const readPrompt = `You are a camera scanner. Your ONLY job is to read handwritten ink from the image and copy it exactly.
+Subject: ${subject}.
+Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
+Total Max Grade: ${totalExamGrade}.
+Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
-Question locations to find (by label/number): ${JSON.stringify(questionLabels)}
+══════════════════════════════════════════════
+PHASE 1: FORENSIC DOCUMENTATION (populate studentAnswer)
+══════════════════════════════════════════════
+You are documenting evidence. A forensic analyst documents what exists — never what should exist.
 
-For each question, find the student's handwritten response in the image and copy it character by character into "rawAnswer".
+For each question, locate the student's handwritten response in the image.
+Document it exactly as written — every digit, symbol, sign, and character.
 
-STRICT RULES — NO EXCEPTIONS:
-- Copy EXACTLY what the ink shows. Character by character. Symbol by symbol.
-- If ink shows "3×5=12" → rawAnswer = "3×5=12". Do NOT write 15.
-- If ink shows "28" → rawAnswer = "28". Do NOT write 25.
-- If ink shows "-41" → rawAnswer = "-41". Do NOT write -51.
-- You are a CAMERA. Cameras do not know math. Cameras do not fix mistakes.
-- NEVER use your knowledge of mathematics to alter what you read.
-- BOXED or CIRCLED content = student's definitive final answer. Copy it first.
-- Crossed-out content = ignore completely.
-- Blank = rawAnswer: "لا توجد إجابة"
-- Unclear = write what you see + "؟" e.g. "٢٨؟"
+⛔ DOCUMENTATION PROHIBITIONS — ABSOLUTE, NO EXCEPTIONS:
+• You may NOT use your knowledge of the correct answer to alter what you document.
+• You may NOT "fix" a number because you know the right answer.
+• You may NOT assume a digit is a typo and correct it.
+• If the student wrote 28 and you know 25 is correct — document: "28". Not 25.
+• If the student wrote 3×(−17) = −51 — document the full expression as written.
+• If the student wrote −41 — document "−41". Not −51.
+• Boxed/circled content = final answer — document it first.
+• Crossed-out content = do not document (ignore).
+• Empty space = document as "لا توجد إجابة".
+• Unclear handwriting = document what you see followed by "؟".
 
-Output JSON only:
-{"readings": [{"id": "...", "rawAnswer": "..."}]}`;
+The studentAnswer field = forensic documentation. It reflects the paper, not the truth.
 
-    const readResponse = await ai.models.generateContent({
+══════════════════════════════════════════════
+PHASE 2: EVALUATION (populate grade and feedback)
+══════════════════════════════════════════════
+Now evaluate what was documented in Phase 1 against the expected 'answer'.
+You are now an evaluator — not a corrector. You judge, you do not fix.
+
+${isMath ? `
+MATH EVALUATION:
+• First, independently verify the correct answer using proper math rules.
+• PEMDAS/BODMAS is absolute: parentheses → exponents → ×÷ → +−.
+• Compare the DOCUMENTED studentAnswer against the correct answer:
+  - Documented answer matches correct answer → full grade.
+  - Documented answer is wrong → 0 (or partial if steps partially correct).
+  - Correct method/steps but one arithmetic slip at the end → deduct 1 mark max.
+• In feedback: state clearly what the student wrote, what is correct, and why the grade was given.
+` : `
+NON-MATH EVALUATION:
+• Compare documented studentAnswer against expected answer by meaning.
+• Full match → full grade. Partial → proportional. Wrong → 0.
+• In feedback: explain what was right and what was wrong.
+`}
+
+══════════════════════════════════════════════
+OUTPUT — JSON only, no markdown:
+══════════════════════════════════════════════
+{"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
+
+• studentAnswer = exactly what Phase 1 documented. Never altered.
+• grade = result of Phase 2 evaluation.
+• feedback = Arabic (العربية الفصحى), states what student wrote, what is correct, brief.
+• box = [ymin, xmin, ymax, xmax] location of student's answer on the page (0–1000 scale).
+• pageIndex = 0-based image index.`;
+
+    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+    parts.push({ text: prompt });
+
+    const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts: [...imageParts, { text: readPrompt }] },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: "You are a document scanner. You copy handwritten text from images with zero interpretation. You have no knowledge of math, science, or any subject. You only see ink marks and copy them exactly as they appear."
-      }
-    });
-
-    const readData = JSON.parse(cleanJson(readResponse.text || '{}'));
-    const readings: { id: string; rawAnswer: string }[] = readData.readings || [];
-
-    // ─────────────────────────────────────────────────────────────
-    // CALL 2 — COMPARE ONLY (no images — text only)
-    // Takes the raw readings from Call 1 and compares against expected answers.
-    // No images = cannot "re-read" and fix anything.
-    // ─────────────────────────────────────────────────────────────
-    const questionsWithReadings = flattenedQuestions.map(q => ({
-      ...q,
-      studentRawAnswer: readings.find(r => r.id === q.id)?.rawAnswer || "لا توجد إجابة"
-    }));
-
-    const comparePrompt = `You are a strict answer evaluator. You receive:
-- A list of questions with their expected answers
-- What the student actually wrote (studentRawAnswer) — already extracted from the image, do NOT change it
-
-Subject: ${subject}
-Student name is on the paper — extract it from the readings if visible, otherwise use "طالب"
-Questions with student answers: ${JSON.stringify(questionsWithReadings)}
-Total Max Grade: ${totalExamGrade}
-Required Questions Count: ${requiredQuestionsCount || 'All'}
-
-YOUR ONLY JOB: compare studentRawAnswer against the expected 'answer' field and assign a grade.
-
-${isMath ? `MATH EVALUATION RULES:
-- Calculate the expected answer yourself independently to verify it.
-- PEMDAS/BODMAS is absolute: parentheses → exponents → × ÷ → + −. For any equation type.
-- Compare studentRawAnswer to the correct result:
-  • Exact match → full grade
-  • Wrong final value, but correct method and steps → deduct 1 mark max
-  • Wrong order of operations used → wrong, grade based on what is correct
-  • Completely wrong → 0
-- DO NOT change studentRawAnswer. It is what the student wrote. Evaluate it as-is.` 
-: `NON-MATH EVALUATION RULES:
-- Compare studentRawAnswer to expected answer meaning.
-- Full match → full grade. Partial → proportional. Wrong → 0.
-- DO NOT change studentRawAnswer.`}
-
-Output JSON only:
-{"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "<copy studentRawAnswer exactly>", "grade": number, "maxGrade": number, "feedback": "...", "box": [0,0,0,0], "pageIndex": 0}]}]}
-
-- studentAnswer: must be identical to studentRawAnswer. Never alter it.
-- feedback: Arabic (العربية الفصحى), brief and constructive.`;
-
-    const compareResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts: [{ text: comparePrompt }] },
+      contents: { parts },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مقيّم رياضيات صارم. تستقبل ما كتبه الطالب كنص جاهز ومهمتك فقط مقارنته بالجواب المتوقع وإعطاء الدرجة. لا تغيّر ما كتبه الطالب أبداً — قيّمه كما هو. قانون أولوية العمليات مطلق: أقواس ثم أسس ثم ضرب وقسمة ثم جمع وطرح. الملاحظات بالعربية الفصحى."
-          : "أنت مقيّم صارم. تستقبل ما كتبه الطالب كنص جاهز ومهمتك مقارنته بالجواب المتوقع وإعطاء الدرجة. لا تغيّر ما كتبه الطالب أبداً. الملاحظات بالعربية الفصحى."
+          ? "أنت محلل وثائق جنائي ومقيّم. دورك مقسوم بصرامة: أولاً — التوثيق الجنائي: سجّل ما كتبه الطالب بالحبر حرفاً بحرف كما هو على الورقة، ولا تغيّر أي رقم أو رمز بأي حجة — إذا كتب 28 سجّل 28 وإذا كتب -41 سجّل -41، دورك هنا هو المحقق الجنائي الذي يوثّق الأدلة كما هي. ثانياً — التقييم: بعد التوثيق، قارن ما وثّقته بالجواب المتوقع وأصدر حكمك — قانون أولوية العمليات مطلق لا استثناء فيه، والحكم يُبنى على ما وثّقته لا على ما يجب أن يكون. الملاحظات بالعربية الفصحى توضح ما كتبه الطالب وما هو الصواب."
+          : "أنت محلل وثائق جنائي ومقيّم. أولاً — وثّق ما كتبه الطالب حرفاً بحرف كما هو بدون أي تغيير أو تفسير. ثانياً — قيّم ما وثّقته مقارنةً بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
       }
     });
 
     if (onProgress) onProgress(100, 100, 'grading');
 
-    const data = JSON.parse(cleanJson(compareResponse.text || '{}'));
-
+    const data = JSON.parse(cleanJson(response.text || '{}'));
     const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
 
-    return { 
+    return {
       results: results.map((r: any) => {
         const gradingsWithMax = (r.gradings || []).map((g: any) => ({
           ...g,
