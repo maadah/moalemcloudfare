@@ -201,79 +201,109 @@ export async function gradeStudentPaper(
     flatten(questions);
 
     if (onProgress) onProgress(0, 100, 'grading');
-    
+
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
+    const imageParts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
 
-    const prompt = `You are a visual ink reader and answer comparator. You have TWO strictly separate jobs.
+    // ─────────────────────────────────────────────────────────────
+    // CALL 1 — READ ONLY
+    // The model sees images + question labels ONLY (no expected answers).
+    // Its only job is to copy what the student physically wrote.
+    // ─────────────────────────────────────────────────────────────
+    const questionLabels = flattenedQuestions.map(q => ({ id: q.id, label: q.label }));
 
-    Current Subject: ${subject}.
-    Questions (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}.
-    Total Exam Max Grade: ${totalExamGrade}.
-    Required Questions Count: ${requiredQuestionsCount || 'All'}.
+    const readPrompt = `You are a camera scanner. Your ONLY job is to read handwritten ink from the image and copy it exactly.
 
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    JOB 1 — READ THE INK (fill studentAnswer field)
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Look at the image and find the student's handwritten answer for each question.
-    Copy what the ink says — exactly, character by character.
+Question locations to find (by label/number): ${JSON.stringify(questionLabels)}
 
-    ABSOLUTE RULES FOR READING:
-    - If the ink shows "3×5=12" → studentAnswer = "3×5=12". NEVER change 12 to 15.
-    - If the ink shows "68-" → studentAnswer = "68-". NEVER change to "28".
-    - If the ink shows "-41" → studentAnswer = "-41". NEVER change to "-51".
-    - Mathematics does NOT matter here. Only what is physically written matters.
-    - BOXED or CIRCLED ink = student's final answer. Copy it exactly.
-    - Crossed-out ink = ignore completely.
-    - Blank area → studentAnswer = "لا توجد إجابة".
-    - Unclear ink → write what you see + note: e.g. "١٢ أو ١٥ غير واضح".
+For each question, find the student's handwritten response in the image and copy it character by character into "rawAnswer".
 
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    JOB 2 — COMPARE (fill grade field)
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Now compare what you READ in Job 1 against the 'answer' field in the JSON.
+STRICT RULES — NO EXCEPTIONS:
+- Copy EXACTLY what the ink shows. Character by character. Symbol by symbol.
+- If ink shows "3×5=12" → rawAnswer = "3×5=12". Do NOT write 15.
+- If ink shows "28" → rawAnswer = "28". Do NOT write 25.
+- If ink shows "-41" → rawAnswer = "-41". Do NOT write -51.
+- You are a CAMERA. Cameras do not know math. Cameras do not fix mistakes.
+- NEVER use your knowledge of mathematics to alter what you read.
+- BOXED or CIRCLED content = student's definitive final answer. Copy it first.
+- Crossed-out content = ignore completely.
+- Blank = rawAnswer: "لا توجد إجابة"
+- Unclear = write what you see + "؟" e.g. "٢٨؟"
 
-    ${isMath ? `MATH COMPARISON:
-    - Re-calculate the expected answer yourself independently before comparing.
-    - PEMDAS/BODMAS is an absolute law: × and ÷ always before + and −, exponents before multiplication, parentheses first. No exceptions for any equation type.
-    - To evaluate the student: check (1) did they apply the correct ORDER OF OPERATIONS? (2) is the final value correct?
-    - If the student violated the order of operations at any step → that step and all steps after it are wrong → grade accordingly.
-    - If method and order are correct but there is a minor arithmetic slip in one step → deduct 1 mark max.
-    - studentAnswer matches expected exactly → full grade.
-    - studentAnswer wrong → 0 or partial based on how many steps were correct.`
-    : `NON-MATH COMPARISON:
-    - studentAnswer matches expected meaning → full grade.
-    - Partially correct → proportional partial grade.
-    - Wrong → 0.`}
+Output JSON only:
+{"readings": [{"id": "...", "rawAnswer": "..."}]}`;
 
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    OUTPUT
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}
-
-    - feedback: العربية الفصحى، مختصر وبنّاء.
-    - box: [ymin, xmin, ymax, xmax] موقع إجابة الطالب على الصفحة (0–1000).
-    - pageIndex: رقم الصورة (يبدأ من 0).`;
-
-    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
+    const readResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: { 
+      contents: { parts: [...imageParts, { text: readPrompt }] },
+      config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: isMath ?
-          "أنت محرك بصري لقراءة الحبر ومقارنة الإجابات. مهمتك مقسومة لجزأين لا يتداخلان: الجزء الأول (قراءة الحبر): انظر مباشرة إلى الصورة وانقل ما هو مكتوب حرفاً بحرف كما تراه — لا يهمك إذا كان صحيحاً أم لا، مهمتك النقل الحرفي فقط. الجزء الثاني (المقارنة): قارن ما نقلته بالجواب المتوقع. قانون أولوية العمليات مطلق لأي معادلة: الأقواس أولاً ثم الأسس ثم الضرب والقسمة ثم الجمع والطرح — أي خطوة تخالف هذا الترتيب تُعدّ خاطئة بغض النظر عن نوع المعادلة أو موضوعها. قيّم: هل طبّق الطالب الترتيب الصحيح؟ هل النتيجة النهائية صحيحة؟ الملاحظات بالعربية الفصحى." :
-          "أنت محرك بصري لقراءة الحبر ومقارنة الإجابات. الجزء الأول: انقل ما كتبه الطالب حرفياً كما تراه في الصورة بدون تغيير أو تفسير. الجزء الثاني: قارن ما نقلته بالجواب المتوقع في JSON وأعط الدرجة المناسبة. الملاحظات بالعربية الفصحى دائماً."
+        systemInstruction: "You are a document scanner. You copy handwritten text from images with zero interpretation. You have no knowledge of math, science, or any subject. You only see ink marks and copy them exactly as they appear."
       }
     });
 
-    const data = JSON.parse(cleanJson(response.text || '{}'));
+    const readData = JSON.parse(cleanJson(readResponse.text || '{}'));
+    const readings: { id: string; rawAnswer: string }[] = readData.readings || [];
+
+    // ─────────────────────────────────────────────────────────────
+    // CALL 2 — COMPARE ONLY (no images — text only)
+    // Takes the raw readings from Call 1 and compares against expected answers.
+    // No images = cannot "re-read" and fix anything.
+    // ─────────────────────────────────────────────────────────────
+    const questionsWithReadings = flattenedQuestions.map(q => ({
+      ...q,
+      studentRawAnswer: readings.find(r => r.id === q.id)?.rawAnswer || "لا توجد إجابة"
+    }));
+
+    const comparePrompt = `You are a strict answer evaluator. You receive:
+- A list of questions with their expected answers
+- What the student actually wrote (studentRawAnswer) — already extracted from the image, do NOT change it
+
+Subject: ${subject}
+Student name is on the paper — extract it from the readings if visible, otherwise use "طالب"
+Questions with student answers: ${JSON.stringify(questionsWithReadings)}
+Total Max Grade: ${totalExamGrade}
+Required Questions Count: ${requiredQuestionsCount || 'All'}
+
+YOUR ONLY JOB: compare studentRawAnswer against the expected 'answer' field and assign a grade.
+
+${isMath ? `MATH EVALUATION RULES:
+- Calculate the expected answer yourself independently to verify it.
+- PEMDAS/BODMAS is absolute: parentheses → exponents → × ÷ → + −. For any equation type.
+- Compare studentRawAnswer to the correct result:
+  • Exact match → full grade
+  • Wrong final value, but correct method and steps → deduct 1 mark max
+  • Wrong order of operations used → wrong, grade based on what is correct
+  • Completely wrong → 0
+- DO NOT change studentRawAnswer. It is what the student wrote. Evaluate it as-is.` 
+: `NON-MATH EVALUATION RULES:
+- Compare studentRawAnswer to expected answer meaning.
+- Full match → full grade. Partial → proportional. Wrong → 0.
+- DO NOT change studentRawAnswer.`}
+
+Output JSON only:
+{"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "<copy studentRawAnswer exactly>", "grade": number, "maxGrade": number, "feedback": "...", "box": [0,0,0,0], "pageIndex": 0}]}]}
+
+- studentAnswer: must be identical to studentRawAnswer. Never alter it.
+- feedback: Arabic (العربية الفصحى), brief and constructive.`;
+
+    const compareResponse = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: { parts: [{ text: comparePrompt }] },
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0,
+        systemInstruction: isMath
+          ? "أنت مقيّم رياضيات صارم. تستقبل ما كتبه الطالب كنص جاهز ومهمتك فقط مقارنته بالجواب المتوقع وإعطاء الدرجة. لا تغيّر ما كتبه الطالب أبداً — قيّمه كما هو. قانون أولوية العمليات مطلق: أقواس ثم أسس ثم ضرب وقسمة ثم جمع وطرح. الملاحظات بالعربية الفصحى."
+          : "أنت مقيّم صارم. تستقبل ما كتبه الطالب كنص جاهز ومهمتك مقارنته بالجواب المتوقع وإعطاء الدرجة. لا تغيّر ما كتبه الطالب أبداً. الملاحظات بالعربية الفصحى."
+      }
+    });
 
     if (onProgress) onProgress(100, 100, 'grading');
 
-    // Flatten results if model outputted directly to 'gradings'
+    const data = JSON.parse(cleanJson(compareResponse.text || '{}'));
+
     const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
 
     return { 
@@ -282,15 +312,8 @@ export async function gradeStudentPaper(
           ...g,
           maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
         }));
-        
-        // Ensure total grade is calculated by summing individual question grades
         const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
-        
-        return {
-          ...r,
-          gradings: gradingsWithMax,
-          totalGrade: computedTotal
-        };
+        return { ...r, gradings: gradingsWithMax, totalGrade: computedTotal };
       })
     };
   } catch (error: any) {
