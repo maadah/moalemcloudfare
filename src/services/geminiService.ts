@@ -233,11 +233,13 @@ export async function gradeStudentPaper(
     Now compare what you READ in Job 1 against the 'answer' field in the JSON.
 
     ${isMath ? `MATH COMPARISON:
-    - Re-calculate the expected answer yourself to verify it is correct.
-    - PEMDAS/BODMAS: × and ÷ before + and −. Always.
-    - studentAnswer matches expected → full grade.
-    - studentAnswer wrong → 0. (e.g. student wrote 12, expected is 15 → grade = 0)
-    - Steps/method correct but only final value wrong → deduct 1 mark max.`
+    - Re-calculate the expected answer yourself independently before comparing.
+    - PEMDAS/BODMAS is an absolute law: × and ÷ always before + and −, exponents before multiplication, parentheses first. No exceptions for any equation type.
+    - To evaluate the student: check (1) did they apply the correct ORDER OF OPERATIONS? (2) is the final value correct?
+    - If the student violated the order of operations at any step → that step and all steps after it are wrong → grade accordingly.
+    - If method and order are correct but there is a minor arithmetic slip in one step → deduct 1 mark max.
+    - studentAnswer matches expected exactly → full grade.
+    - studentAnswer wrong → 0 or partial based on how many steps were correct.`
     : `NON-MATH COMPARISON:
     - studentAnswer matches expected meaning → full grade.
     - Partially correct → proportional partial grade.
@@ -262,7 +264,7 @@ export async function gradeStudentPaper(
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath ?
-          "أنت محرك بصري لقراءة الحبر ومقارنة الإجابات. مهمتك مقسومة لجزأين لا يتداخلان: الجزء الأول (قراءة الحبر): انظر مباشرة إلى الصورة وانقل ما هو مكتوب حرفاً بحرف كما تراه بالحبر — إذا رأيت 3×5=12 اكتب 3×5=12 وليس 15، إذا رأيت 68- اكتب 68-، لا يهمك إذا كان الجواب صحيحاً رياضياً أم لا، مهمتك النقل الحرفي فقط. الجزء الثاني (المقارنة): بعد نقل ما كتبه الطالب، قارنه بالجواب المتوقع في JSON وأعط الدرجة. أولوية العمليات (ضرب وقسمة قبل جمع وطرح). الملاحظات بالعربية الفصحى." :
+          "أنت محرك بصري لقراءة الحبر ومقارنة الإجابات. مهمتك مقسومة لجزأين لا يتداخلان: الجزء الأول (قراءة الحبر): انظر مباشرة إلى الصورة وانقل ما هو مكتوب حرفاً بحرف كما تراه — لا يهمك إذا كان صحيحاً أم لا، مهمتك النقل الحرفي فقط. الجزء الثاني (المقارنة): قارن ما نقلته بالجواب المتوقع. قانون أولوية العمليات مطلق لأي معادلة: الأقواس أولاً ثم الأسس ثم الضرب والقسمة ثم الجمع والطرح — أي خطوة تخالف هذا الترتيب تُعدّ خاطئة بغض النظر عن نوع المعادلة أو موضوعها. قيّم: هل طبّق الطالب الترتيب الصحيح؟ هل النتيجة النهائية صحيحة؟ الملاحظات بالعربية الفصحى." :
           "أنت محرك بصري لقراءة الحبر ومقارنة الإجابات. الجزء الأول: انقل ما كتبه الطالب حرفياً كما تراه في الصورة بدون تغيير أو تفسير. الجزء الثاني: قارن ما نقلته بالجواب المتوقع في JSON وأعط الدرجة المناسبة. الملاحظات بالعربية الفصحى دائماً."
       }
     });
