@@ -60,6 +60,7 @@ export interface GradingResult {
   box?: [number, number, number, number];
   pageIndex?: number;
   studentAnswerImage?: string; // base64 JPEG crop of the student's answer area (without data: prefix)
+  needsReview?: boolean; // true when verification pass detected a mismatch
 }
 
 const getApiKey = () => {
@@ -551,6 +552,107 @@ Output JSON only:
 
     const data = JSON.parse(cleanJson(compareResponse.text || '{}'));
     const results = data.results || (data.gradings ? [{ studentName, gradings: data.gradings, totalGrade: data.totalGrade }] : []);
+
+    // ─────────────────────────────────────────────────────────────────────
+    // CALL 3 — VERIFICATION PASS
+    // For every answer marked "correct" (full grade), re-examine the cropped
+    // image with a closed yes/no question: does the ink actually say the
+    // model's expected final value? If NO, the transcription was wrong —
+    // demote the grade and flag for review.
+    //
+    // This catches the failure mode where the scanner "corrects" the student
+    // in its head: student wrote 21, scanner wrote "12" (the right answer),
+    // comparator agreed → false-positive. The verifier sees just the ink
+    // and the expected value, so it can't paper over the mismatch.
+    // ─────────────────────────────────────────────────────────────────────
+    const verifyAnswer = async (
+      questionId: string,
+      cropBase64: string,
+      expectedFinal: string
+    ): Promise<{ matches: boolean; actualInk: string }> => {
+      const verifyPrompt = `You are a verification scanner. Look at this image of a student's handwritten answer.
+
+The system claims the student wrote: "${expectedFinal}"
+
+Your job: confirm whether the ink in the image ACTUALLY shows "${expectedFinal}" as the final answer (the value after the last "=" sign, OR the boxed/circled value).
+
+ABSOLUTE RULES:
+1. You have NO math knowledge. Do not compute anything.
+2. Read the ink shapes EXACTLY as drawn. Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) are equivalent to Western (0-9) — that is the ONLY allowed equivalence.
+3. "12" and "21" are DIFFERENT. "14" and "-14" are DIFFERENT. "10" and "100" are DIFFERENT.
+4. If the ink shows something different from "${expectedFinal}", say NO and report what you actually see.
+
+Output JSON only:
+{"matches": true|false, "actualInk": "what the ink actually says, character by character"}`;
+
+      try {
+        const verifyResponse = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: {
+            parts: [
+              { inlineData: { data: cropBase64, mimeType: "image/jpeg" } },
+              { text: verifyPrompt }
+            ]
+          },
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0,
+            systemInstruction: "You are a verification scanner with zero math knowledge. You confirm or deny whether an image's ink matches a claimed text value. You read ink shapes only — never compute, never correct. 12 ≠ 21. Be strict."
+          }
+        });
+        const verifyData = JSON.parse(cleanJson(verifyResponse.text || '{}'));
+        return {
+          matches: verifyData.matches === true,
+          actualInk: String(verifyData.actualInk ?? '')
+        };
+      } catch (e) {
+        console.warn(`[verify] failed for ${questionId}:`, e);
+        // On verifier failure, assume original grade stands (don't punish on infra errors)
+        return { matches: true, actualInk: '' };
+      }
+    };
+
+    // Collect all "correct" gradings that need verification
+    type GradingToVerify = { result: any; grading: any; expectedFinal: string; crop: string };
+    const toVerify: GradingToVerify[] = [];
+    for (const r of results) {
+      for (const g of r.gradings || []) {
+        const maxGrade = g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0;
+        const crop = answerCrops[g.questionId];
+        // Only verify when: full marks given AND we have a crop to check
+        if (crop && maxGrade > 0 && Number(g.grade) >= maxGrade) {
+          // Extract the final value the student supposedly wrote (after last "=")
+          const txt = String(g.studentAnswer || '').trim();
+          const lastEq = txt.lastIndexOf('=');
+          const expectedFinal = lastEq >= 0 ? txt.slice(lastEq + 1).trim() : txt;
+          if (expectedFinal) {
+            toVerify.push({ result: r, grading: g, expectedFinal, crop });
+          }
+        }
+      }
+    }
+
+    // Run verifications in parallel, but cap concurrency to avoid rate limits
+    const CONCURRENCY = 3;
+    for (let i = 0; i < toVerify.length; i += CONCURRENCY) {
+      const batch = toVerify.slice(i, i + CONCURRENCY);
+      const verdicts = await Promise.all(
+        batch.map(item => verifyAnswer(item.grading.questionId, item.crop, item.expectedFinal))
+      );
+      batch.forEach((item, idx) => {
+        const verdict = verdicts[idx];
+        if (!verdict.matches) {
+          // Transcription was wrong — the answer is actually incorrect.
+          const maxGrade = item.grading.maxGrade || flattenedQuestions.find(fq => fq.id === item.grading.questionId)?.grade || 0;
+          const original = item.grading.studentAnswer;
+          item.grading.grade = 0;
+          item.grading.needsReview = true;
+          item.grading.studentAnswer = verdict.actualInk || original;
+          item.grading.feedback = `⚠️ تنبيه: النسخ الأصلي قال "${original}" لكن التحقق البصري من الصورة قرأ "${verdict.actualInk}". الجواب النموذجي هو "${item.expectedFinal}" — لا يتطابق. الدرجة 0. (يحتاج مراجعة المعلم).`;
+          console.warn(`[verify] mismatch for ${item.grading.questionId}: claimed "${original}", ink actually says "${verdict.actualInk}"`);
+        }
+      });
+    }
 
     return {
       results: results.map((r: any) => {
