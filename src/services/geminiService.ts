@@ -1,49 +1,41 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Friendly error messages — converts raw API errors to readable Arabic text
-// Keys are sanitized and never exposed to the user
+// Friendly error messages
 // ─────────────────────────────────────────────────────────────────────────────
 const friendlyError = (error: unknown): string => {
   const raw = error instanceof Error ? error.message : String(error);
-
-  // Sanitize — remove any API key patterns before logging or displaying
   const safe = raw
     .replace(/AIza[A-Za-z0-9_\-]{30,}/g, 'AIza***')
     .replace(/api[_-]?key[:\s'"]+[A-Za-z0-9_\-]{10,}/gi, 'api_key:***')
     .replace(/sk-[A-Za-z0-9_\-]{20,}/g, 'sk-***');
-
-  // Parse error code from JSON if present
   let code: number | null = null;
   try {
     const m = raw.match(/\{[\s\S]*"error"[\s\S]*\}/);
     if (m) code = JSON.parse(m[0])?.error?.code ?? null;
-  } catch { /* */ }
-
+  } catch { }
   if (raw.includes('suspended') || raw.includes('Permission denied'))
     return '🚫 مفتاح API موقوف. افتح الإعدادات (⚙️) وأدخل مفتاحاً جديداً.';
   if (code === 503 || raw.includes('high demand') || raw.includes('UNAVAILABLE'))
-    return '🔄 الخادم مشغول حالياً بسبب الضغط العالي. انتظر دقيقة أو دقيقتين ثم أعد المحاولة.';
+    return '🔄 الخادم مشغول حالياً. انتظر دقيقة أو دقيقتين ثم أعد المحاولة.';
   if (code === 429 || raw.includes('quota') || raw.includes('rate limit') || raw.includes('RESOURCE_EXHAUSTED'))
-    return '⏳ تم تجاوز حد الاستخدام اليومي. انتظر بضع دقائق ثم أعد المحاولة.';
+    return '⏳ تم تجاوز حد الاستخدام. انتظر بضع دقائق ثم أعد المحاولة.';
   if (code === 401 || raw.includes('UNAUTHENTICATED') || raw.includes('Unauthorized'))
-    return '🔑 مفتاح API غير صحيح أو منتهي الصلاحية. افتح الإعدادات (⚙️) وتأكد من المفتاح.';
+    return '🔑 مفتاح API غير صحيح. افتح الإعدادات (⚙️) وتأكد من المفتاح.';
   if (code === 403 || raw.includes('Forbidden'))
     return '⛔ المفتاح لا يملك صلاحية استخدام هذا النموذج.';
   if (code === 400 || raw.includes('INVALID_ARGUMENT'))
-    return '⚠️ خطأ في البيانات المُرسلة. تأكد من وضوح الصور وأعد المحاولة.';
+    return '⚠️ خطأ في البيانات. تأكد من وضوح الصور وأعد المحاولة.';
   if (code === 500 || raw.includes('INTERNAL'))
     return '🛠️ خطأ داخلي في خادم Gemini. أعد المحاولة بعد لحظات.';
   if (raw.includes('Failed to fetch') || raw.includes('NetworkError'))
     return '🌐 انقطع الاتصال بالإنترنت. تحقق من اتصالك وأعد المحاولة.';
   if (raw.includes('JSON') || raw.includes('SyntaxError'))
-    return '📄 فشل في قراءة نتيجة العملية. أعد المحاولة أو قلّل عدد الصور.';
+    return '📄 فشل في قراءة النتيجة. أعد المحاولة أو قلّل عدد الصور.';
   if (raw.includes('timeout') || raw.includes('AbortError'))
     return '⌛ انتهت مهلة الطلب. قلّل عدد الصور وأعد المحاولة.';
-
-  // Fallback — log sanitized version to console, show generic message to user
   console.error('[geminiService] Unhandled error:', safe);
-  return '❌ حدث خطأ غير متوقع. أعد المحاولة، وإذا استمر تحقق من إعدادات مفتاح API.';
+  return '❌ حدث خطأ غير متوقع. أعد المحاولة أو تحقق من إعدادات مفتاح API.';
 };
 
 export interface Question {
@@ -75,16 +67,14 @@ const getApiKey = () => {
   try {
     const envKey = process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY;
     if (envKey && envKey !== 'undefined' && envKey !== '') return envKey.trim();
-  } catch (e) {}
+  } catch (e) { }
   return (localStorage.getItem('GEMINI_API_KEY_FALLBACK') || '').trim();
 };
 
 const getApiKeyErrorMessage = () => {
-  const isNetlify = window.location.hostname.includes('netlify.app');
-  if (isNetlify) {
-    return 'مفتاح API غير مضبوط. إذا كنت تستخدم Netlify، تأكد من إضافة المفتاح باسم VITE_GEMINI_API_KEY في إعدادات البيئة. يمكنك أيضاً إدخاله يدوياً من أيقونة الإعدادات (⚙️) في الأعلى.';
-  }
-  return 'مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.';
+  const isCloudflare = window.location.hostname.includes('.pages.dev');
+  if (isCloudflare) return 'مفتاح API غير مضبوط. تأكد من إضافة VITE_GEMINI_API_KEY في Cloudflare Pages → Settings → Environment Variables ثم أعد النشر.';
+  return 'مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) وإدخال مفتاح Gemini API.';
 };
 
 const cleanJson = (text: string) => {
@@ -92,58 +82,64 @@ const cleanJson = (text: string) => {
   return match ? match[0] : text;
 };
 
+async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = url;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width, height = img.height;
+      if (width > height) { if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; } }
+      else { if (height > maxHeight) { width *= maxHeight / height; height = maxHeight; } }
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('Could not get canvas context'));
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('فشل في تحميل الصورة'));
+  });
+}
+
+function fixInlineSubQuestions(q: any, parentId?: string, level: number = 1): any {
+  const id = q.id || `${parentId || 'q'}_${Math.random().toString(36).substr(2, 4)}`;
+  if (q.subQuestions && q.subQuestions.length > 0) {
+    return { ...q, id, subQuestions: q.subQuestions.map((sq: any, i: number) => fixInlineSubQuestions(sq, `${id}_${i}`, level + 1)) };
+  }
+  return { ...q, id };
+}
+
 export async function extractExamFromDualImages(
-  questionImages: string[],
-  answerImages: string[]
+  questionImages: string[], answerImages: string[]
 ): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error(getApiKeyErrorMessage());
     const ai = new GoogleGenAI({ apiKey });
 
-    const qImagesData = await Promise.all(questionImages.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
-    }));
-
-    const aImagesData = await Promise.all(answerImages.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
-    }));
+    const qImagesData = await Promise.all(questionImages.map(b64 => compressImage(b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`, 1500, 1500, 0.7)));
+    const aImagesData = await Promise.all(answerImages.map(b64 => compressImage(b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`, 1500, 1500, 0.7)));
 
     const prompt = `Analyze these Iraqi exam questions and their model answers. Match them.
     Output a JSON object with:
     - title: String (exam subject)
-    - requiredQuestionsCount: Number (if specified, e.g. "Answer 5 only")
+    - requiredQuestionsCount: Number (if specified)
     - questions: Array of objects with {text, grade, answer, type, options, subQuestions: []}
-    
-    CRITICAL: 
-    - Preserve Arabic digits (٠-٩).
-    - For sub-questions (e.g. branch A, B, or numbers 1, 2), nest them inside the parent question.
-    - GRADE EXTRACTION: Strictly copy the grade written on the paper. DO NOT divide the parent grade among sub-questions yourself.
-    - Clean the 'text' field by removing redundant identifiers (like "س1:", "أ-", "1-") if already represented by structure.
-    - If a question has sub-questions, the parent 'text' should be the general instruction only.
-    - If images are text-only, extract the full text.`;
+    CRITICAL: Preserve Arabic digits (٠-٩). Nest sub-questions. Copy grades exactly. Clean redundant identifiers from text.`;
 
-    const parts: any[] = [];
-    parts.push({ text: "QUESTIONS IMAGES:" });
-    qImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
+    const parts: any[] = [{ text: "QUESTIONS IMAGES:" }];
+    qImagesData.forEach(data => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: "MODEL ANSWERS IMAGES:" });
-    aImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
+    aImagesData.forEach(data => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction: "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown."
-      }
+      model: "gemini-3-flash-preview", contents: { parts },
+      config: { responseMimeType: "application/json", temperature: 0.1, systemInstruction: "You are an expert Iraqi teacher. Extract exam data precisely into JSON." }
     });
-
     const data = JSON.parse(cleanJson(response.text || '{}'));
-    if (data && Array.isArray(data.questions)) {
-      data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
-    }
+    if (data && Array.isArray(data.questions)) data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
     return data || { title: "", questions: [] };
   } catch (error) {
     console.error("Extraction error:", error);
@@ -157,40 +153,19 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     if (!apiKey) throw new Error(getApiKeyErrorMessage());
     const ai = new GoogleGenAI({ apiKey });
 
-    const imagesData = await Promise.all(base64Images.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
-    }));
+    const imagesData = await Promise.all(base64Images.map(b64 => compressImage(b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`, 1500, 1500, 0.7)));
 
-    const prompt = `Extract questions from this Iraqi exam paper. 
-    Output a JSON object with:
-    - title: String
-    - requiredQuestionsCount: Number
-    - questions: Array of objects with {text, grade, answer (leave empty if not found), type}.
-    
-    CRITICAL: 
-    - Preserve Arabic digits (٠-٩). 
-    - Nest sub-questions properly.
-    - GRADE EXTRACTION: Strictly copy original grades. DO NOT invent or divide grades for sub-questions.
-    - Clean the 'text' field by removing redundant identifiers if already represented by structure.
-    - If a question has sub-questions, the parent 'text' should be the general instruction only.`;
+    const prompt = `Extract questions from this Iraqi exam paper. Output JSON with: title, requiredQuestionsCount, questions [{text, grade, answer, type}].
+    CRITICAL: Preserve Arabic digits. Nest sub-questions. Copy grades exactly. Clean redundant identifiers.`;
 
-    const parts: any[] = imagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
+    const parts: any[] = [...imagesData.map(data => ({ inlineData: { data, mimeType: "image/jpeg" } })), { text: prompt }];
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction: "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears."
-      }
+      model: "gemini-3-flash-preview", contents: { parts },
+      config: { responseMimeType: "application/json", temperature: 0.1, systemInstruction: "You are an expert Iraqi teacher. Extract exam data into JSON. DO NOT perform arithmetic during extraction — copy exactly what is written." }
     });
-
     const data = JSON.parse(cleanJson(response.text || '{}'));
-    if (data && Array.isArray(data.questions)) {
-      data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
-    }
+    if (data && Array.isArray(data.questions)) data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
     return data || { title: "", questions: [] };
   } catch (error) {
     console.error("Extraction error:", error);
@@ -212,11 +187,9 @@ export async function gradeStudentPaper(
     const ai = new GoogleGenAI({ apiKey });
 
     if (onProgress) onProgress(0, imageUrls.length, 'compressing');
-
     const base64ImagesData: string[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
-      const compressed = await compressImage(imageUrls[i], 2000, 2000, 0.85);
-      base64ImagesData.push(compressed);
+      base64ImagesData.push(await compressImage(imageUrls[i], 2000, 2000, 0.85));
       if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
     }
 
@@ -237,511 +210,112 @@ export async function gradeStudentPaper(
     flatten(questions);
 
     if (onProgress) onProgress(0, 100, 'grading');
-
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
+    const imageParts: any[] = base64ImagesData.map(data => ({ inlineData: { data, mimeType: "image/jpeg" } }));
 
-    const prompt = `You are a RESULT COMPARATOR and ERROR LOCATOR. You do NOT solve equations. Ever.
+    // ─────────────────────────────────────────────────────────────────────
+    // CALL 1 — BLIND TRANSCRIPTION
+    // Model sees images only — no questions, no answers.
+    // Cannot "fix" what it doesn't know is wrong.
+    // ─────────────────────────────────────────────────────────────────────
+    const questionLabels = flattenedQuestions.map(q => ({ id: q.id, label: q.label }));
 
-Subject: ${subject}.
-Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
-Total Max Grade: ${totalExamGrade}.
-Required Questions Count: ${requiredQuestionsCount || 'All'}.
+    const transcribePrompt = `You are a document scanner. Scan this exam paper and copy handwritten text exactly.
 
-⛔ ABSOLUTE RULE — NO EXCEPTIONS:
-You are FORBIDDEN from solving, calculating, or computing any equation.
-Your math knowledge is DISABLED for solving.
-You only READ what is written and COMPARE two values.
+For each question label listed here: ${JSON.stringify(questionLabels)}
+Find the student's handwritten response area for that question and copy EVERY character — digit by digit, symbol by symbol, line by line.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — READ STUDENT'S FINAL RESULT FROM IMAGE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Look at the image. Find where the student wrote their final answer for this question.
-The final answer is: the LAST number written, OR the boxed/circled value.
-Copy these digits exactly as ink on paper — do not calculate, do not verify.
-Leave your answer field blank for now. Store only: STUDENT_FINAL = [what you see].
+RULES — NO EXCEPTIONS:
+- You are a SCANNER. Copy ink shapes exactly. Do not interpret meaning.
+- Copy every number, sign (+−×÷√=), and step you see in the answer area.
+- [BOXED: value] — if student boxed or circled a value, mark it this way.
+- Crossed-out text: skip.
+- Blank area: write "BLANK".
+- Unclear: copy what you see + "?".
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2 — READ MODEL ANSWER FINAL RESULT FROM JSON
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Look at the 'answer' field in the JSON for this question.
-Read only the FINAL numeric result from it.
-Store: MODEL_FINAL = [that value].
-Do NOT solve anything. Just read the value.
+Output JSON only:
+{"studentName": "...", "transcriptions": [{"id": "...", "rawText": "..."}]}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 3 — COMPARE THE TWO VALUES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Compare STUDENT_FINAL with MODEL_FINAL as two text strings.
-Is the string STUDENT_FINAL identical to MODEL_FINAL?
+- studentName: the student's name if written on the paper, otherwise "طالب".
+- id: must match exactly the id from the question labels list.
+- rawText: everything written in the answer area for that question, copied character by character.`;
 
-✅ YES — identical strings → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
-❌ NO — strings differ → go to Step 4.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 4 — LOCATE THE ERROR IN STUDENT'S WORKING (only if Step 3 failed)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The student's final result differs from the model answer. Why?
-Read the student's FULL working from the image — all steps, as raw ink.
-studentAnswer = copy everything written digit by digit.
-
-Now compare the student's STEPS against the model answer STEPS visually.
-You are looking for WHERE the student's path diverged from the model answer path.
-You are NOT solving — you are comparing two written paths.
-
-${isMath ? `
-Check in this order — stop at FIRST difference found:
-
-① OPERATION ORDER: 
-   Look at which operation the student performed FIRST.
-   Look at which operation the model answer performed FIRST.
-   Are they the same? If not → ORDER_OF_OPERATIONS error. Grade = 0.
-
-② SIGNS:
-   Compare each + − × ÷ √ symbol the student wrote vs the model answer.
-   Find the first symbol that differs.
-   → SIGN_ERROR. Grade = partial based on correct steps before this.
-
-③ ARITHMETIC VALUES:
-   For each step, compare the number the student wrote as the result vs 
-   the number in the model answer for that same step.
-   Find the first step where the numbers differ.
-   → ARITHMETIC_SLIP. Deduct 1 mark max for single slip.
-
-④ FORMULA/METHOD:
-   Is the student's approach completely different from the model answer?
-   → WRONG_METHOD. Grade based on validity.
-
-⑤ INCOMPLETE:
-   Student stopped before finishing.
-   → Partial grade for completed correct steps.
-` : `
-Compare student answer content to model answer:
-- Full match → full grade
-- Partial → proportional  
-- Wrong → 0
-`}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT — JSON only, no markdown:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
-
-• studentAnswer = STUDENT_FINAL (Step 3 pass) or full working as written (Step 4).
-• grade = full (Step 3) or 0/partial based on Step 4 error location.
-• feedback = Arabic (العربية الفصحى):
-  Step 3 pass → brief praise.
-  Step 4 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. السبب: [شرح نقطة الانحراف بالضبط]."
-• box = [ymin, xmin, ymax, xmax] location of student answer (0–1000 scale).
-• pageIndex = 0-based image index.\`;
-
-    const parts: any[] = [];
-    parts.push({ text: "QUESTIONS IMAGES:" });
-    qImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: "MODEL ANSWERS IMAGES:" });
-    aImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
+    const transcribeResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts },
+      contents: { parts: [...imageParts, { text: transcribePrompt }] },
       config: {
         responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction: "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown."
+        temperature: 0,
+        systemInstruction: "You are a document scanner. You convert handwritten images to raw text with zero interpretation. You have no knowledge of math or any subject. You only see ink marks and copy them exactly as they appear. You never alter, fix, or interpret what you see."
       }
     });
 
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-    if (data && Array.isArray(data.questions)) {
-      data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
-    }
-    return data || { title: "", questions: [] };
-  } catch (error) {
-    console.error("Extraction error:", error);
-    throw new Error(friendlyError(error));
-  }
-}
+    const transcribeData = JSON.parse(cleanJson(transcribeResponse.text || '{}'));
+    const studentName: string = transcribeData.studentName || 'طالب غير معروف';
+    const transcriptions: { id: string, rawText: string }[] = transcribeData.transcriptions || [];
 
-export async function extractExamFromImages(base64Images: string[]): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
-  try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
-    const imagesData = await Promise.all(base64Images.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
+    const questionsWithRaw = flattenedQuestions.map(q => ({
+      ...q,
+      studentRawText: transcriptions.find(t => t.id === q.id)?.rawText || 'BLANK'
     }));
 
-    const prompt = `Extract questions from this Iraqi exam paper. 
-    Output a JSON object with:
-    - title: String
-    - requiredQuestionsCount: Number
-    - questions: Array of objects with {text, grade, answer (leave empty if not found), type}.
-    
-    CRITICAL: 
-    - Preserve Arabic digits (٠-٩). 
-    - Nest sub-questions properly.
-    - GRADE EXTRACTION: Strictly copy original grades. DO NOT invent or divide grades for sub-questions.
-    - Clean the 'text' field by removing redundant identifiers if already represented by structure.
-    - If a question has sub-questions, the parent 'text' should be the general instruction only.`;
-
-    const parts: any[] = imagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction: "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears."
-      }
-    });
-
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-    if (data && Array.isArray(data.questions)) {
-      data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
-    }
-    return data || { title: "", questions: [] };
-  } catch (error) {
-    console.error("Extraction error:", error);
-    throw new Error(friendlyError(error));
-  }
-}
-
-export async function gradeStudentPaper(
-  imageUrls: string[],
-  questions: Question[],
-  totalExamGrade: number,
-  requiredQuestionsCount: number,
-  subject: string = "عام",
-  onProgress?: (current: number, total: number, phase: 'compressing' | 'grading') => void
-): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
-  try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
-    if (onProgress) onProgress(0, imageUrls.length, 'compressing');
-
-    const base64ImagesData: string[] = [];
-    for (let i = 0; i < imageUrls.length; i++) {
-      const compressed = await compressImage(imageUrls[i], 2000, 2000, 0.85);
-      base64ImagesData.push(compressed);
-      if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
-    }
-
-    const flattenedQuestions: any[] = [];
-    const flatten = (qs: Question[], parentText: string = "", path: string = "") => {
-      qs.forEach((q, index) => {
-        let label = q.text.split(/[:\-\.\/\(\)\[\]]/)[0].trim();
-        if (label.length > 15 || label.length === 0) label = `سؤال ${index + 1}`;
-        const fullPath = path ? `${path} / ${label}` : label;
-        const combinedText = parentText ? `${parentText} - ${q.text}` : q.text;
-        if (!q.subQuestions || q.subQuestions.length === 0) {
-          flattenedQuestions.push({ id: q.id, label: fullPath, text: combinedText, answer: q.answer, grade: q.grade, type: q.type });
-        } else {
-          flatten(q.subQuestions, combinedText, fullPath);
-        }
-      });
-    };
-    flatten(questions);
-
-    if (onProgress) onProgress(0, 100, 'grading');
-
-    const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
-
-    const prompt = `You are a mathematical equation analyst. Your role is to analyse why a student reached a different result — not to correct them.
+    // ─────────────────────────────────────────────────────────────────────
+    // CALL 2 — COMPARISON ONLY (text only, no images)
+    // Model receives transcribed text + expected answers.
+    // Cannot re-read or re-interpret the student's work.
+    // ─────────────────────────────────────────────────────────────────────
+    const comparePrompt = `You are a strict answer comparator. You receive transcribed student answers and compare them against expected answers.
 
 Subject: ${subject}.
-Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
+Student name: ${studentName}.
+Questions with expected answers and transcribed student text:
+${JSON.stringify(questionsWithRaw)}
 Total Max Grade: ${totalExamGrade}.
 Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — READ STUDENT'S FINAL RESULT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find the last value the student wrote, or the boxed/circled value.
-Read the digits exactly as they appear — raw ink, no interpretation.
-Store as STUDENT_FINAL.
+For each question:
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2 — COMPARE WITH MODEL ANSWER FINAL RESULT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Compare STUDENT_FINAL with the final value in the 'answer' field.
+STEP 1 — Extract student's FINAL value from studentRawText:
+  Final value = last number in the text, OR [BOXED: value] if present.
+  Do NOT compute anything. Just read the last value written.
+  Store as STUDENT_FINAL.
 
-✅ Match → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
-❌ No match → go to Step 3.
+STEP 2 — Compare STUDENT_FINAL with the 'answer' field (final value only):
+  ✅ Values match → full grade. studentAnswer = STUDENT_FINAL. Done.
+  ❌ Values differ → Step 3.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 3 — EQUATION DIVERGENCE ANALYSIS (only if Step 2 failed)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The model answer produced result X. The student produced result Y. Why did they diverge?
+STEP 3 — Locate error in studentRawText (only if Step 2 failed):
+${isMath ? `  Compare the student's written steps against the model answer steps:
+  ① Operation order: did student do + or − before × or ÷? → ORDER_OF_OPERATIONS error → grade 0.
+  ② Signs: wrong + − × ÷ √ compared to model answer? → SIGN_ERROR → partial grade.
+  ③ Arithmetic: a step result differs from model answer same step? → ARITHMETIC_SLIP → deduct 1 mark max.
+  ④ Wrong method/formula? → WRONG_METHOD → grade based on validity.
+  ⑤ Incomplete? → partial for completed correct steps.`
+    : `  Compare meaning of studentRawText with expected answer. Partial credit proportionally.`}
 
-Read the student's full working from the image.
-studentAnswer = everything written, copied digit by digit as raw ink.
+Output JSON only:
+{"results":[{"studentName":"${studentName}","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[0,0,0,0],"pageIndex":0}]}]}
 
-Ask yourself: "At which exact point did the student's equation path separate from the model answer path?"
+- studentAnswer: STUDENT_FINAL if Step 2 passed, or full studentRawText if Step 3.
+- grade: full (Step 2) or 0/partial (Step 3).
+- feedback: Arabic (العربية الفصحى). Step 2 pass → brief praise. Step 3 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. الخطأ: [وصف دقيق لنقطة الانحراف]."`;
 
-${isMath ? `
-Work through this checklist in order — stop at the FIRST divergence point:
-
-① ORDER OF OPERATIONS DIVERGENCE
-   Look at the very first operation the student performed.
-   Did they perform + or − before × or ÷ when the model answer did × or ÷ first?
-   Did they ignore or mishandle parentheses?
-   If YES → the paths diverged here. All subsequent steps, even if arithmetically correct,
-   were built on this wrong foundation. This explains why the final result is different.
-   Grade = 0.
-
-② SIGN DIVERGENCE
-   Scan every + − × ÷ √ written by the student.
-   Find the first sign that differs from the model answer.
-   This is the divergence point.
-   Grade = partial based on correct steps before this point.
-
-③ ARITHMETIC DIVERGENCE
-   The student used the correct order and correct signs, but computed a value incorrectly.
-   Find which step produced the wrong number.
-   Grade = deduct 1 mark max for a single slip, more for multiple.
-
-④ METHOD DIVERGENCE
-   The student used a completely different formula or approach.
-   Evaluate whether the alternative method is valid.
-   Grade based on validity of their approach.
-
-⑤ INCOMPLETE
-   The student's work ends before reaching a final result.
-   Grade = partial for completed correct steps.
-` : `
-Compare student's answer content to model answer:
-- Full meaning match → full grade
-- Partial match → proportional
-- Wrong → 0
-`}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT — JSON only, no markdown:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
-
-• studentAnswer = STUDENT_FINAL (Step 2 pass) or full working as written (Step 3).
-• grade = full (Step 2) or based on divergence point (Step 3).
-• feedback = Arabic (العربية الفصحى):
-  Step 2 pass → brief praise.
-  Step 3 → explain the divergence: "الطالب وصل إلى [نتيجته] بينما الجواب النموذجي [النتيجة الصحيحة]، والسبب أن الطالب في [الخطوة المحددة] قام بـ [العملية الخاطئة] في حين أن الصحيح هو [العملية الصحيحة]".
-• box = [ymin, xmin, ymax, xmax] location of student answer (0–1000 scale).
-• pageIndex = 0-based image index.\`;
-
-    const parts: any[] = [];
-    parts.push({ text: "QUESTIONS IMAGES:" });
-    qImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: "MODEL ANSWERS IMAGES:" });
-    aImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
+    const compareResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction: "You are an expert Iraqi teacher. Extract exam data precisely into JSON. Ensure all numbers, symbols, and mathematical expressions are captured exactly as shown."
-      }
-    });
-
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-    if (data && Array.isArray(data.questions)) {
-      data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
-    }
-    return data || { title: "", questions: [] };
-  } catch (error) {
-    console.error("Extraction error:", error);
-    throw new Error(friendlyError(error));
-  }
-}
-
-export async function extractExamFromImages(base64Images: string[]): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
-  try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
-    const imagesData = await Promise.all(base64Images.map(async (base64) => {
-      return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
-    }));
-
-    const prompt = `Extract questions from this Iraqi exam paper. 
-    Output a JSON object with:
-    - title: String
-    - requiredQuestionsCount: Number
-    - questions: Array of objects with {text, grade, answer (leave empty if not found), type}.
-    
-    CRITICAL: 
-    - Preserve Arabic digits (٠-٩). 
-    - Nest sub-questions properly.
-    - GRADE EXTRACTION: Strictly copy original grades. DO NOT invent or divide grades for sub-questions.
-    - Clean the 'text' field by removing redundant identifiers if already represented by structure.
-    - If a question has sub-questions, the parent 'text' should be the general instruction only.`;
-
-    const parts: any[] = imagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        systemInstruction: "You are an expert Iraqi teacher. Extract exam data into JSON with high precision. Capture all mathematical formulas and Arabic digits correctly. DO NOT perform arithmetic yourself during extraction; strictly copy exactly what is written on the page or provided in the input. If you see 85/5, DO NOT calculate 17 or 18, just write the expression or the result exactly as it appears."
-      }
-    });
-
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-    if (data && Array.isArray(data.questions)) {
-      data.questions = data.questions.map((q: any) => fixInlineSubQuestions(q));
-    }
-    return data || { title: "", questions: [] };
-  } catch (error) {
-    console.error("Extraction error:", error);
-    throw new Error(friendlyError(error));
-  }
-}
-
-export async function gradeStudentPaper(
-  imageUrls: string[],
-  questions: Question[],
-  totalExamGrade: number,
-  requiredQuestionsCount: number,
-  subject: string = "عام",
-  onProgress?: (current: number, total: number, phase: 'compressing' | 'grading') => void
-): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
-  try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
-
-    if (onProgress) onProgress(0, imageUrls.length, 'compressing');
-
-    const base64ImagesData: string[] = [];
-    for (let i = 0; i < imageUrls.length; i++) {
-      const compressed = await compressImage(imageUrls[i], 2000, 2000, 0.85);
-      base64ImagesData.push(compressed);
-      if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
-    }
-
-    const flattenedQuestions: any[] = [];
-    const flatten = (qs: Question[], parentText: string = "", path: string = "") => {
-      qs.forEach((q, index) => {
-        let label = q.text.split(/[:\-\.\/\(\)\[\]]/)[0].trim();
-        if (label.length > 15 || label.length === 0) label = `سؤال ${index + 1}`;
-        const fullPath = path ? `${path} / ${label}` : label;
-        const combinedText = parentText ? `${parentText} - ${q.text}` : q.text;
-        if (!q.subQuestions || q.subQuestions.length === 0) {
-          flattenedQuestions.push({ id: q.id, label: fullPath, text: combinedText, answer: q.answer, grade: q.grade, type: q.type });
-        } else {
-          flatten(q.subQuestions, combinedText, fullPath);
-        }
-      });
-    };
-    flatten(questions);
-
-    if (onProgress) onProgress(0, 100, 'grading');
-
-    const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
-
-    const prompt = `You are a precise answer evaluator working directly on handwritten exam images.
-
-Subject: ${subject}.
-Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
-Total Max Grade: ${totalExamGrade}.
-Required Questions Count: ${requiredQuestionsCount || 'All'}.
-
-For each question follow these steps in order:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — READ THE STUDENT'S FINAL VALUE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find the last number/value the student wrote, or the boxed/circled value.
-Read it as raw digits — do not interpret or alter.
-Store as STUDENT_FINAL.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2 — COMPARE FINAL VALUE WITH MODEL ANSWER
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Compare STUDENT_FINAL with the 'answer' field from the JSON.
-
-✅ They match → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
-❌ They do not match → go to Step 3.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 3 — COMPARE STUDENT STEPS WITH MODEL ANSWER STEPS (only if Step 2 failed)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Read the student's complete working from the image — all steps as written.
-studentAnswer = copy everything written, digit by digit as raw ink.
-
-Now compare the student's steps against the model answer steps one by one:
-
-${isMath ? `
-CHECK these specific elements in order — compare student vs model answer:
-
-1. ORDER OF OPERATIONS: Did the student apply the same operation sequence as the model answer?
-   (parentheses first, then × ÷, then + −). If order differs → ORDER_OF_OPERATIONS error.
-
-2. SIGNS: Compare every +, −, ×, ÷, √ sign the student used vs the model answer.
-   Any sign mismatch → SIGN_ERROR.
-
-3. ARITHMETIC: For each step, does the student's calculated value match what that step should produce?
-   (compare step result vs model answer's same step result). If differs → ARITHMETIC_SLIP.
-
-4. FORMULA/METHOD: Did the student use the same approach as the model answer?
-   If completely different method → WRONG_FORMULA.
-
-5. COMPLETENESS: Did the student finish all steps? If stopped early → INCOMPLETE.
-
-Grade based on where the error first occurred:
-- Error in step 1 (order of operations) → 0
-- Error only in final arithmetic step → deduct 1 mark max
-- Partially correct steps → proportional partial grade
-` : `
-Compare student answer to model answer:
-- Full match in meaning → full grade
-- Partial match → proportional grade  
-- Wrong → 0
-`}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT — JSON only, no markdown:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
-
-• studentAnswer = STUDENT_FINAL (Step 2 pass) or full working (Step 3).
-• grade = full (Step 2) or 0/partial (Step 3).
-• feedback = Arabic (العربية الفصحى):
-  - Step 2 pass → brief praise.
-  - Step 3 → state exactly: what the student wrote, which element was wrong (order/sign/arithmetic/formula), what the model answer shows, and the grade reason.
-• box = [ymin, xmin, ymax, xmax] location of student answer (0–1000 scale).
-• pageIndex = 0-based image index.`;
-
-    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
+      contents: { parts: [{ text: comparePrompt }] },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مقارن نتائج ومحدد أخطاء — لست حاساً ولا محللاً. قاعدة مطلقة: يُمنع عليك حل أي معادلة أو إجراء أي حساب. دورك فقط: (١) اقرأ الرقم النهائي الذي كتبه الطالب في الورقة. (٢) اقرأ الرقم النهائي من حقل answer في JSON. (٣) قارن الرقمين كنصين — إن تطابقا درجة كاملة. إن اختلفا: قارن خطوات الطالب المكتوبة بصرياً مع خطوات الجواب النموذجي وابحث عن أول نقطة اختلاف — هل بدأ الطالب بعملية مختلفة؟ هل استخدم إشارة مختلفة؟ هل كتب رقماً مختلفاً في خطوة معينة؟ لا تحسب أي شيء — فقط قارن ما هو مكتوب. الملاحظات بالعربية الفصحى."
-          : "أنت مقارن إجابات — لست محللاً ولا حاساً. اقرأ الجواب النهائي للطالب وقارنه بالجواب النموذجي كنصين. إن تطابقا درجة كاملة. إن اختلفا قارن محتوى الإجابة بالجواب النموذجي وحدد نقطة الاختلاف. لا تحل أي شيء. الملاحظات بالعربية الفصحى."
+          ? "أنت مقارن نصوص صارم. تستقبل نصاً منسوخاً من ورقة الطالب وتقارنه بالجواب النموذجي. لا تحل أي معادلة. استخرج الرقم النهائي من النص المنسوخ وقارنه بالجواب النموذجي. إن اختلفا ابحث في النص عن أول نقطة اختلاف عن الجواب النموذجي. الملاحظات بالعربية الفصحى."
+          : "أنت مقارن نصوص. قارن النص المنسوخ بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
       }
     });
 
     if (onProgress) onProgress(100, 100, 'grading');
 
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-    const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
+    const data = JSON.parse(cleanJson(compareResponse.text || '{}'));
+    const results = data.results || (data.gradings ? [{ studentName, gradings: data.gradings, totalGrade: data.totalGrade }] : []);
 
     return {
       results: results.map((r: any) => {
@@ -757,41 +331,4 @@ OUTPUT — JSON only, no markdown:
     console.error("Grading error:", error);
     throw new Error(friendlyError(error));
   }
-}
-
-async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = url;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      let width = img.width;
-      let height = img.height;
-      if (width > height) {
-        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
-      } else {
-        if (height > maxHeight) { width *= maxHeight / height; height = maxHeight; }
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return reject(new Error('Could not get canvas context'));
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1]);
-    };
-    img.onerror = () => reject(new Error('فشل في تحميل الصورة لمعالجتها'));
-  });
-}
-
-function fixInlineSubQuestions(q: any, parentId?: string, level: number = 1): any {
-  const id = q.id || `${parentId || 'q'}_${Math.random().toString(36).substr(2, 4)}`;
-  if (q.subQuestions && q.subQuestions.length > 0) {
-    return {
-      ...q,
-      id,
-      subQuestions: q.subQuestions.map((sq: any, i: number) => fixInlineSubQuestions(sq, `${id}_${i}`, level + 1))
-    };
-  }
-  return { ...q, id };
 }
