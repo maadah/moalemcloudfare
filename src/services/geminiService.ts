@@ -198,19 +198,216 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PASS 1: Read student answers ONLY — NO model answers provided
+// This prevents the AI from "correcting" what it reads to match expected answers
+// ═══════════════════════════════════════════════════════════════════════════════
+async function readStudentAnswers(
+  ai: GoogleGenAI,
+  base64ImagesData: string[],
+  flattenedQuestions: any[],
+  subject: string
+): Promise<{ studentName: string; answers: { questionId: string; studentAnswer: string; box?: [number, number, number, number]; pageIndex?: number }[] }> {
+  
+  // We send ONLY the question texts (without answers) so the AI cannot "correct"
+  const questionTextsOnly = flattenedQuestions.map(q => ({
+    id: q.id,
+    label: q.label,
+    text: q.text,
+    type: q.type
+  }));
+
+  const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
+
+  const prompt = `You are a handwriting reader. Your ONLY job is to read what the student wrote — exactly as written.
+
+Subject: ${subject}
+Questions to find answers for: ${JSON.stringify(questionTextsOnly)}
+
+ABSOLUTE RULES — VIOLATION IS FATAL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. You MUST read the student's handwriting EXACTLY as it appears on the paper.
+2. If the student wrote "3×2=7", you MUST write "3×2=7" — NOT "3×2=6".
+3. If the student wrote "15+3=20", you MUST write "15+3=20" — NOT "15+3=18".
+4. NEVER use your math knowledge to "fix" or "correct" what the student wrote.
+5. NEVER calculate the answer yourself and substitute it for what the student wrote.
+6. If a number is unclear or ambiguous, write what you see and add "?" after it.
+7. Copy ALL intermediate steps the student wrote, exactly as written.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ ${isMath ? `
+MATH-SPECIFIC RULES:
+- Read EVERY digit, sign, and symbol the student wrote — even if mathematically wrong.
+- If the student wrote a wrong final answer, write that wrong answer exactly.
+- If the student wrote intermediate steps (like carrying, crossing out), copy them.
+- The student may have written: the question, their work, and a final answer.
+  → Copy ALL of it exactly as written on paper.
+- If you see "=7" written by the student, write "=7" even if you know the answer should be "=6".
+` : ''}
+
+For each question, find where the student answered it and read their answer EXACTLY.
+
+OUTPUT — JSON only, no markdown:
+{"studentName":"...","answers":[{"questionId":"...","studentAnswer":"exact text as written by student","box":[ymin,xmin,ymax,xmax],"pageIndex":0}]}
+
+• studentAnswer must be the RAW text copied from the student's paper — wrong numbers and all.
+• box = [ymin, xmin, ymax, xmax] location of student answer (0–1000 scale).
+• pageIndex = 0-based image index.`;
+
+  const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+  parts.push({ text: prompt });
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: { parts },
+    config: {
+      responseMimeType: "application/json",
+      temperature: 0,
+      systemInstruction: isMath
+        ? `أنت قارئ خط يد فقط — لا تقيّم ولا تصحح أبداً. وظيفتك الوحيدة: اقرأ ما كتبه الطالب حرفياً كما يظهر على الورقة. إذا كتب الطالب ٣×٢=٧ فاكتب ٣×٢=٧ حتى لو كنت تعرف أن الجواب الصحيح ٦. لا تستخدم معرفتك الرياضية أبداً لتصحيح أو تغيير ما تقرأه. انقل الأرقام والإشارات والرموز بالضبط كما كتبها الطالب — خطأ كان أم صواب.`
+        : `أنت قارئ خط يد فقط. اقرأ ما كتبه الطالب بالضبط كما يظهر على الورقة — لا تصحح ولا تغيّر أبداً.`
+    }
+  });
+
+  const data = JSON.parse(cleanJson(response.text || '{}'));
+  return {
+    studentName: data.studentName || 'طالب غير معروف',
+    answers: data.answers || []
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PASS 2: Compare student answers with model answers and grade
+// Now the AI gets both the student's raw answer AND the model answer for comparison
+// ═══════════════════════════════════════════════════════════════════════════════
+async function compareAndGrade(
+  ai: GoogleGenAI,
+  studentAnswers: { questionId: string; studentAnswer: string; box?: [number, number, number, number]; pageIndex?: number }[],
+  flattenedQuestions: any[],
+  totalExamGrade: number,
+  requiredQuestionsCount: number,
+  subject: string
+): Promise<{ gradings: GradingResult[] }> {
+  
+  const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
+
+  // Build comparison pairs: student answer + model answer for each question
+  const comparisons = flattenedQuestions.map(q => {
+    const student = studentAnswers.find(s => s.questionId === q.id);
+    return {
+      questionId: q.id,
+      label: q.label,
+      text: q.text,
+      modelAnswer: q.answer,
+      grade: q.grade,
+      type: q.type,
+      studentAnswer: student?.studentAnswer || '(لم يتم العثور على إجابة)',
+      box: student?.box,
+      pageIndex: student?.pageIndex
+    };
+  });
+
+  const prompt = `You are a grading judge. You receive the student's answer (already read from paper) and the model answer. Compare and grade.
+
+Subject: ${subject}
+Total Max Grade: ${totalExamGrade}
+Required Questions Count: ${requiredQuestionsCount || 'All'}
+
+Comparison data: ${JSON.stringify(comparisons)}
+
+GRADING RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. The studentAnswer field was read directly from the student's paper — treat it as accurate.
+2. Compare studentAnswer with modelAnswer to determine the grade.
+
+ ${isMath ? `
+MATH GRADING — STEP BY STEP:
+
+STEP 1: Extract the FINAL numeric value from studentAnswer.
+  - If student wrote "3×2=7", the final value is 7.
+  - If student wrote a multi-step solution, take the last computed result.
+
+STEP 2: Extract the FINAL numeric value from modelAnswer.
+
+STEP 3: Compare final values:
+  ✅ Match → full grade. Done.
+  ❌ Don't match → go to Step 4.
+
+STEP 4: Analyze the error by comparing student's steps with model answer steps:
+  Check in this order:
+  A. ORDER OF OPERATIONS: Did the student follow the same operation sequence?
+     (parentheses → × ÷ → + −). If different → ORDER_ERROR → 0 grade.
+  
+  B. SIGNS: Compare every +, −, ×, ÷ sign. Any mismatch → SIGN_ERROR → partial or 0.
+  
+  C. ARITHMETIC: For each step, does the computed value match what it should be?
+     If only the last step has a small arithmetic error → deduct 1 mark max.
+  
+  D. FORMULA/METHOD: Did the student use the same approach?
+     Different method but correct result → full grade.
+     Different method and wrong result → 0 grade.
+  
+  E. COMPLETENESS: Did the student finish? Incomplete → proportional partial grade.
+
+  Grading based on error type:
+  - Order of operations error → 0
+  - Wrong formula/method → 0
+  - Sign error in early step → 0
+  - Arithmetic slip in final step only → deduct max 1 mark (e.g., if question is 5 marks → 4)
+  - Multiple arithmetic errors → proportional deduction
+  - Partially correct steps → proportional partial grade
+` : `
+NON-MATH GRADING:
+- Full match in meaning → full grade
+- Partial match → proportional grade
+- Wrong or missing → 0
+`}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT — JSON only, no markdown:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{"gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}
+
+• studentAnswer = the student's answer as provided in the input (do not modify it).
+• grade = numeric grade for this question.
+• feedback = Arabic (العربية الفصحى):
+  - Full grade → brief praise.
+  - Partial/zero → state: what the student wrote, what the model answer is, where the error is, and why this grade was given.
+• box and pageIndex = copy from input data.`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: { parts: [{ text: prompt }] },
+    config: {
+      responseMimeType: "application/json",
+      temperature: 0,
+      systemInstruction: isMath
+        ? `أنت مقيّم رياضيات. تحصل على إجابة الطالب (التي قُرئت مسبقاً من الورقة) والجواب النموذجي. قارن بينهما فقط. لا تقرأ من صورة — الإجابة أمامك نصياً. قيّم بناءً على المقارنة: هل الجواب النهائي صحيح؟ إن لم يكن، حلل الخطأ (ترتيب عمليات، إشارات، حساب، طريقة) وأعطِ الدرجة المناسبة. الملاحظات بالعربية الفصحى توضح أين الخطأ ولماذا هذه الدرجة.`
+        : `أنت مقيّم. تحصل على إجابة الطالب والجواب النموذجي — قارن وقيّم. الملاحظات بالعربية الفصحى.`
+    }
+  });
+
+  const data = JSON.parse(cleanJson(response.text || '{}'));
+  return { gradings: data.gradings || [] };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN GRADING FUNCTION — Now uses Two-Pass approach
+// ═══════════════════════════════════════════════════════════════════════════════
 export async function gradeStudentPaper(
   imageUrls: string[],
   questions: Question[],
   totalExamGrade: number,
   requiredQuestionsCount: number,
   subject: string = "عام",
-  onProgress?: (current: number, total: number, phase: 'compressing' | 'grading') => void
+  onProgress?: (current: number, total: number, phase: 'compressing' | 'reading' | 'grading') => void
 ): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
   try {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error(getApiKeyErrorMessage());
     const ai = new GoogleGenAI({ apiKey });
 
+    // ─── Phase 0: Compress images ───
     if (onProgress) onProgress(0, imageUrls.length, 'compressing');
 
     const base64ImagesData: string[] = [];
@@ -220,6 +417,7 @@ export async function gradeStudentPaper(
       if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
     }
 
+    // ─── Flatten questions (same as before) ───
     const flattenedQuestions: any[] = [];
     const flatten = (qs: Question[], parentText: string = "", path: string = "") => {
       qs.forEach((q, index) => {
@@ -236,112 +434,55 @@ export async function gradeStudentPaper(
     };
     flatten(questions);
 
+    // ═══════════════════════════════════════════════════════════════════
+    // PASS 1: Read student answers WITHOUT model answers
+    // This is the KEY change — AI doesn't know correct answers while reading
+    // ═══════════════════════════════════════════════════════════════════
+    if (onProgress) onProgress(0, 100, 'reading');
+
+    const readResult = await readStudentAnswers(ai, base64ImagesData, flattenedQuestions, subject);
+
+    if (onProgress) onProgress(50, 100, 'reading');
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PASS 2: Compare and grade — now AI gets both student & model answers
+    // ═══════════════════════════════════════════════════════════════════
     if (onProgress) onProgress(0, 100, 'grading');
 
-    const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
-
-    const prompt = `You are a precise answer evaluator working directly on handwritten exam images.
-
-Subject: ${subject}.
-Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
-Total Max Grade: ${totalExamGrade}.
-Required Questions Count: ${requiredQuestionsCount || 'All'}.
-
-For each question follow these steps in order:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — READ THE STUDENT'S FINAL VALUE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find the last number/value the student wrote, or the boxed/circled value.
-Read it as raw digits — do not interpret or alter.
-Store as STUDENT_FINAL.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2 — COMPARE FINAL VALUE WITH MODEL ANSWER
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Compare STUDENT_FINAL with the 'answer' field from the JSON.
-
-✅ They match → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
-❌ They do not match → go to Step 3.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 3 — COMPARE STUDENT STEPS WITH MODEL ANSWER STEPS (only if Step 2 failed)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Read the student's complete working from the image — all steps as written.
-studentAnswer = copy everything written, digit by digit as raw ink.
-
-Now compare the student's steps against the model answer steps one by one:
-
-${isMath ? `
-CHECK these specific elements in order — compare student vs model answer:
-
-1. ORDER OF OPERATIONS: Did the student apply the same operation sequence as the model answer?
-   (parentheses first, then × ÷, then + −). If order differs → ORDER_OF_OPERATIONS error.
-
-2. SIGNS: Compare every +, −, ×, ÷, √ sign the student used vs the model answer.
-   Any sign mismatch → SIGN_ERROR.
-
-3. ARITHMETIC: For each step, does the student's calculated value match what that step should produce?
-   (compare step result vs model answer's same step result). If differs → ARITHMETIC_SLIP.
-
-4. FORMULA/METHOD: Did the student use the same approach as the model answer?
-   If completely different method → WRONG_FORMULA.
-
-5. COMPLETENESS: Did the student finish all steps? If stopped early → INCOMPLETE.
-
-Grade based on where the error first occurred:
-- Error in step 1 (order of operations) → 0
-- Error only in final arithmetic step → deduct 1 mark max
-- Partially correct steps → proportional partial grade
-` : `
-Compare student answer to model answer:
-- Full match in meaning → full grade
-- Partial match → proportional grade  
-- Wrong → 0
-`}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT — JSON only, no markdown:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
-
-• studentAnswer = STUDENT_FINAL (Step 2 pass) or full working (Step 3).
-• grade = full (Step 2) or 0/partial (Step 3).
-• feedback = Arabic (العربية الفصحى):
-  - Step 2 pass → brief praise.
-  - Step 3 → state exactly: what the student wrote, which element was wrong (order/sign/arithmetic/formula), what the model answer shows, and the grade reason.
-• box = [ymin, xmin, ymax, xmax] location of student answer (0–1000 scale).
-• pageIndex = 0-based image index.`;
-
-    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: isMath
-          ? "أنت مقيّم رياضيات صارم. لكل سؤال: أولاً اقرأ الجواب النهائي للطالب وقارنه بالجواب النموذجي — إن تطابقا درجة كاملة وانتهى. إن اختلفا: اقرأ خطوات الطالب كاملة وقارنها بخطوات الجواب النموذجي خطوة بخطوة — تحقق من: (١) ترتيب العمليات هل يطابق الجواب النموذجي؟ (٢) الإشارات +−×÷√ هل تطابق الجواب النموذجي؟ (٣) النتائج الحسابية في كل خطوة هل تطابق الجواب النموذجي؟ (٤) الطريقة والقانون المستخدم. أعط الدرجة بناءً على أول خطأ وجدته. الملاحظات بالعربية الفصحى توضح بالضبط أين الخطأ."
-          : "أنت مقيّم دقيق. لكل سؤال: اقرأ جواب الطالب النهائي وقارنه بالجواب النموذجي — إن تطابق درجة كاملة. إن اختلف قارن إجابته بالجواب النموذجي وحدد الفرق. الملاحظات بالعربية الفصحى."
-      }
-    });
+    const gradeResult = await compareAndGrade(
+      ai,
+      readResult.answers,
+      flattenedQuestions,
+      totalExamGrade,
+      requiredQuestionsCount,
+      subject
+    );
 
     if (onProgress) onProgress(100, 100, 'grading');
 
-    const data = JSON.parse(cleanJson(response.text || '{}'));
-    const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
+    // ─── Merge results ───
+    const gradingsWithMax: GradingResult[] = gradeResult.gradings.map((g: any) => {
+      const question = flattenedQuestions.find(fq => fq.id === g.questionId);
+      const studentData = readResult.answers.find(s => s.questionId === g.questionId);
+      return {
+        questionId: g.questionId,
+        studentAnswer: g.studentAnswer || studentData?.studentAnswer || '',
+        grade: Number(g.grade) || 0,
+        feedback: g.feedback || '',
+        box: g.box || studentData?.box,
+        pageIndex: g.pageIndex ?? studentData?.pageIndex,
+        maxGrade: question?.grade || 0
+      } as GradingResult & { maxGrade: number };
+    });
+
+    const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
 
     return {
-      results: results.map((r: any) => {
-        const gradingsWithMax = (r.gradings || []).map((g: any) => ({
-          ...g,
-          maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
-        }));
-        const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
-        return { ...r, gradings: gradingsWithMax, totalGrade: computedTotal };
-      })
+      results: [{
+        studentName: readResult.studentName,
+        gradings: gradingsWithMax,
+        totalGrade: computedTotal
+      }]
     };
   } catch (error: any) {
     console.error("Grading error:", error);
