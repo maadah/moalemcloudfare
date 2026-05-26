@@ -303,6 +303,8 @@ OUTPUT — JSON only:
     throw new Error(friendlyError(error));
   }
 }
+
+export async function gradeMultipleStudents(
   imageUrls: string[],
   questions: Question[],
   totalExamGrade: number,
@@ -450,7 +452,7 @@ Output JSON only:
 - feedback: Arabic (العربية الفصحى).
   Step 3 pass → brief praise.
   Step 4 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. الخطأ: [وصف دقيق لنقطة الانحراف]."
-- box/pageIndex: set to 0.`;`;
+- box/pageIndex: set to 0.`;
 
     const compareResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
