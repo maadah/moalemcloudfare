@@ -250,48 +250,45 @@ Required Questions Count: ${requiredQuestionsCount || 'All'}.
 ══════════════════════════════════════════════
 PHASE 1: FORENSIC DOCUMENTATION (populate studentAnswer)
 ══════════════════════════════════════════════
-CRITICAL MINDSET: Treat every character the student wrote as a BARCODE — 
-a barcode scanner does not know what the barcode means, it just reads the pattern.
-You are that scanner. You read patterns of ink. You do not understand what they mean.
+You are documenting evidence. A forensic analyst documents what exists — never what should exist.
 
-For each question, find the student's handwritten response in the image.
-Read every character as an isolated ink pattern — digit by digit, symbol by symbol.
+For each question, locate the student's handwritten response in the image.
+Document it exactly as written — every digit, symbol, sign, and character.
 
-⛔ ABSOLUTE PROHIBITIONS:
-• A digit is a shape — not a mathematical value. Read the shape, not the value.
-• NEVER read a sequence of digits as a calculation result.
-• NEVER use the surrounding equation context to "confirm" or "correct" a digit.
-• If the ink shape looks like "2" followed by "8" → document "28". Period.
-• If the ink shape looks like "2" followed by "5" → document "25". Period.
-• The fact that an equation "should" produce a certain number is IRRELEVANT.
-• You are blind to mathematics during this phase. Completely blind.
-• Boxed/circled = final answer, document first.
-• Crossed-out = do not document.
-• Empty = "لا توجد إجابة".
-• Unclear shape = document what you see + "؟".
+⛔ DOCUMENTATION PROHIBITIONS — ABSOLUTE, NO EXCEPTIONS:
+• You may NOT use your knowledge of the correct answer to alter what you document.
+• You may NOT "fix" a number because you know the right answer.
+• You may NOT assume a digit is a typo and correct it.
+• If the student wrote 28 and you know 25 is correct — document: "28". Not 25.
+• If the student wrote 3×(−17) = −51 — document the full expression as written.
+• If the student wrote −41 — document "−41". Not −51.
+• Boxed/circled content = final answer — document it first.
+• Crossed-out content = do not document (ignore).
+• Empty space = document as "لا توجد إجابة".
+• Unclear handwriting = document what you see followed by "؟".
 
-The studentAnswer field = the exact ink pattern on the paper. Nothing else.
+The studentAnswer field = forensic documentation. It reflects the paper, not the truth.
 
 ══════════════════════════════════════════════
 PHASE 2: EVALUATION (populate grade and feedback)
 ══════════════════════════════════════════════
-Now you regain your mathematical knowledge. Compare what was documented in Phase 1 against the expected 'answer'.
+Now evaluate what was documented in Phase 1 against the expected 'answer'.
+You are now an evaluator — not a corrector. You judge, you do not fix.
 
 ${isMath ? `
 MATH EVALUATION:
-• Verify the correct answer yourself using proper math rules.
-• PEMDAS/BODMAS absolute: parentheses → exponents → ×÷ → +−. No exceptions.
-• Compare documented studentAnswer to the correct answer:
-  - Match → full grade.
-  - Wrong final value, correct method and steps → deduct 1 mark max.
-  - Wrong order of operations → grade = 0 for affected steps.
-  - Completely wrong → 0.
-• feedback must state: what the student wrote, what is correct, why the grade was given.
+• First, independently verify the correct answer using proper math rules.
+• PEMDAS/BODMAS is absolute: parentheses → exponents → ×÷ → +−.
+• Compare the DOCUMENTED studentAnswer against the correct answer:
+  - Documented answer matches correct answer → full grade.
+  - Documented answer is wrong → 0 (or partial if steps partially correct).
+  - Correct method/steps but one arithmetic slip at the end → deduct 1 mark max.
+• In feedback: state clearly what the student wrote, what is correct, and why the grade was given.
 ` : `
 NON-MATH EVALUATION:
-• Compare documented studentAnswer to expected answer by meaning.
+• Compare documented studentAnswer against expected answer by meaning.
 • Full match → full grade. Partial → proportional. Wrong → 0.
-• feedback must state what was right and what was wrong.
+• In feedback: explain what was right and what was wrong.
 `}
 
 ══════════════════════════════════════════════
@@ -299,10 +296,10 @@ OUTPUT — JSON only, no markdown:
 ══════════════════════════════════════════════
 {"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
 
-• studentAnswer = Phase 1 ink documentation. Identical to what is on the paper.
-• grade = Phase 2 evaluation result.
-• feedback = Arabic (العربية الفصحى), states what student wrote vs what is correct.
-• box = [ymin, xmin, ymax, xmax] location on page (0–1000 scale).
+• studentAnswer = exactly what Phase 1 documented. Never altered.
+• grade = result of Phase 2 evaluation.
+• feedback = Arabic (العربية الفصحى), states what student wrote, what is correct, brief.
+• box = [ymin, xmin, ymax, xmax] location of student's answer on the page (0–1000 scale).
 • pageIndex = 0-based image index.`;
 
     const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
@@ -315,8 +312,8 @@ OUTPUT — JSON only, no markdown:
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت ماسح ضوئي للحبر ثم مقيّم رياضي. المرحلة الأولى (المسح): تعامل مع كل رقم على الورقة كأنه باركود — الباركود لا يفهم معناه بل يقرأ الشكل فقط. اقرأ كل رقم كشكل مستقل منفصل عن السياق الرياضي المحيط به — إذا رأيت شكل ٢ ثم شكل ٨ سجّل ٢٨، وإذا رأيت شكل ٢ ثم شكل ٥ سجّل ٢٥، ولا علاقة لك بما يجب أن تكون عليه المعادلة. أنت في هذه المرحلة لا تفهم الرياضيات — فقط تقرأ أشكال الحبر. المرحلة الثانية (التقييم): الآن استرجع معرفتك الرياضية وقارن ما سجّلته بالجواب المتوقع، أولوية العمليات مطلقة، واذكر في الملاحظات ما كتبه الطالب وما هو الصواب. الملاحظات بالعربية الفصحى."
-          : "أنت ماسح ضوئي للحبر ثم مقيّم. المرحلة الأولى: اقرأ كل حرف ورقم كشكل مستقل وسجّله كما هو بدون أي تفسير أو تغيير. المرحلة الثانية: قارن ما سجّلته بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
+          ? "أنت محلل وثائق جنائي ومقيّم. دورك مقسوم بصرامة: أولاً — التوثيق الجنائي: سجّل ما كتبه الطالب بالحبر حرفاً بحرف كما هو على الورقة، ولا تغيّر أي رقم أو رمز بأي حجة — إذا كتب 28 سجّل 28 وإذا كتب -41 سجّل -41، دورك هنا هو المحقق الجنائي الذي يوثّق الأدلة كما هي. ثانياً — التقييم: بعد التوثيق، قارن ما وثّقته بالجواب المتوقع وأصدر حكمك — قانون أولوية العمليات مطلق لا استثناء فيه، والحكم يُبنى على ما وثّقته لا على ما يجب أن يكون. الملاحظات بالعربية الفصحى توضح ما كتبه الطالب وما هو الصواب."
+          : "أنت محلل وثائق جنائي ومقيّم. أولاً — وثّق ما كتبه الطالب حرفاً بحرف كما هو بدون أي تغيير أو تفسير. ثانياً — قيّم ما وثّقته مقارنةً بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
       }
     });
 
