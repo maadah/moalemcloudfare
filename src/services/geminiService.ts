@@ -240,66 +240,64 @@ export async function gradeStudentPaper(
 
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
 
-    const prompt = `You are a forensic document analyst and evaluator. Your task has two phases that must never bleed into each other.
+    const prompt = `You are a precise answer evaluator working directly on handwritten exam images.
 
 Subject: ${subject}.
 Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
 Total Max Grade: ${totalExamGrade}.
 Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
-══════════════════════════════════════════════
-PHASE 1: FORENSIC DOCUMENTATION (populate studentAnswer)
-══════════════════════════════════════════════
-You are documenting evidence. A forensic analyst documents what exists — never what should exist.
+For each question, follow this exact two-stage process:
 
-For each question, locate the student's handwritten response in the image.
-Document it exactly as written — every digit, symbol, sign, and character.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STAGE 1 — LOOK AT THE FINAL ANSWER ONLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Find the student's final written result for this question.
+The final answer is: the last number/expression written, OR the boxed/circled value.
 
-⛔ DOCUMENTATION PROHIBITIONS — ABSOLUTE, NO EXCEPTIONS:
-• You may NOT use your knowledge of the correct answer to alter what you document.
-• You may NOT "fix" a number because you know the right answer.
-• You may NOT assume a digit is a typo and correct it.
-• If the student wrote 28 and you know 25 is correct — document: "28". Not 25.
-• If the student wrote 3×(−17) = −51 — document the full expression as written.
-• If the student wrote −41 — document "−41". Not −51.
-• Boxed/circled content = final answer — document it first.
-• Crossed-out content = do not document (ignore).
-• Empty space = document as "لا توجد إجابة".
-• Unclear handwriting = document what you see followed by "؟".
+Read this final value as a RAW INK PATTERN — digit by digit, shape by shape.
+Do not interpret it mathematically. Do not validate it. Just read the last value.
 
-The studentAnswer field = forensic documentation. It reflects the paper, not the truth.
+Compare this raw final value against the expected 'answer':
+✅ They match → full grade. Record studentAnswer = that final value. STOP here.
+❌ They do not match → proceed to Stage 2.
 
-══════════════════════════════════════════════
-PHASE 2: EVALUATION (populate grade and feedback)
-══════════════════════════════════════════════
-Now evaluate what was documented in Phase 1 against the expected 'answer'.
-You are now an evaluator — not a corrector. You judge, you do not fix.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STAGE 2 — ANALYSE THE FULL WORKING (only reached if Stage 1 failed)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Now read the student's complete written work for this question — all steps.
+Record studentAnswer = the complete expression as written on the paper, digit by digit.
 
+⛔ While reading: treat every digit as an isolated ink shape — not a math value.
+   If ink shows "28" → record "28". If ink shows "34-6=28" → record "34-6=28".
+   Never alter a digit because the math "should" give a different result.
+
+Then identify the error type from this list:
 ${isMath ? `
-MATH EVALUATION:
-• First, independently verify the correct answer using proper math rules.
-• PEMDAS/BODMAS is absolute: parentheses → exponents → ×÷ → +−.
-• Compare the DOCUMENTED studentAnswer against the correct answer:
-  - Documented answer matches correct answer → full grade.
-  - Documented answer is wrong → 0 (or partial if steps partially correct).
-  - Correct method/steps but one arithmetic slip at the end → deduct 1 mark max.
-• In feedback: state clearly what the student wrote, what is correct, and why the grade was given.
+  • ORDER_OF_OPERATIONS — student did not follow PEMDAS/BODMAS (×÷ before +−, parentheses first)
+  • ARITHMETIC_SLIP — correct method and order, but made a calculation mistake in one step
+  • WRONG_FORMULA — used the wrong formula or approach entirely
+  • SIGN_ERROR — mistake with negative/positive signs
+  • INCOMPLETE — started correctly but did not finish
+  • OTHER — describe clearly
 ` : `
-NON-MATH EVALUATION:
-• Compare documented studentAnswer against expected answer by meaning.
-• Full match → full grade. Partial → proportional. Wrong → 0.
-• In feedback: explain what was right and what was wrong.
+  • FACTUAL_ERROR — wrong fact or concept
+  • INCOMPLETE — partially answered
+  • WRONG_CONCEPT — misunderstood the question
+  • OTHER — describe clearly
 `}
 
-══════════════════════════════════════════════
+Assign partial grade based on how far the student got correctly before the error.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT — JSON only, no markdown:
-══════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
 
-• studentAnswer = exactly what Phase 1 documented. Never altered.
-• grade = result of Phase 2 evaluation.
-• feedback = Arabic (العربية الفصحى), states what student wrote, what is correct, brief.
-• box = [ymin, xmin, ymax, xmax] location of student's answer on the page (0–1000 scale).
+• studentAnswer = final value if Stage 1 passed, or full working if Stage 2 reached.
+• grade = full if Stage 1 passed, partial or 0 based on error analysis in Stage 2.
+• feedback = Arabic (العربية الفصحى): if Stage 1 passed → brief praise. If Stage 2 → state what the student wrote, the error type, and what is correct.
+• box = [ymin, xmin, ymax, xmax] location of student answer on page (0–1000 scale).
 • pageIndex = 0-based image index.`;
 
     const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
@@ -312,8 +310,8 @@ OUTPUT — JSON only, no markdown:
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت محلل وثائق جنائي ومقيّم. دورك مقسوم بصرامة: أولاً — التوثيق الجنائي: سجّل ما كتبه الطالب بالحبر حرفاً بحرف كما هو على الورقة، ولا تغيّر أي رقم أو رمز بأي حجة — إذا كتب 28 سجّل 28 وإذا كتب -41 سجّل -41، دورك هنا هو المحقق الجنائي الذي يوثّق الأدلة كما هي. ثانياً — التقييم: بعد التوثيق، قارن ما وثّقته بالجواب المتوقع وأصدر حكمك — قانون أولوية العمليات مطلق لا استثناء فيه، والحكم يُبنى على ما وثّقته لا على ما يجب أن يكون. الملاحظات بالعربية الفصحى توضح ما كتبه الطالب وما هو الصواب."
-          : "أنت محلل وثائق جنائي ومقيّم. أولاً — وثّق ما كتبه الطالب حرفاً بحرف كما هو بدون أي تغيير أو تفسير. ثانياً — قيّم ما وثّقته مقارنةً بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
+          ? "أنت مقيّم إجابات رياضية دقيق. لكل سؤال اتبع مرحلتين: المرحلة الأولى — انظر للجواب النهائي فقط (آخر رقم أو القيمة المحاطة بمستطيل) وقارنه بالجواب المتوقع. إذا تطابقا → درجة كاملة وانتهى. المرحلة الثانية (فقط عند عدم التطابق) — اقرأ خطوات الطالب كاملة رقماً رقماً كما هي بالحبر دون تغيير، ثم حدد نوع الخطأ: خطأ ترتيب عمليات، أو خطأ حسابي، أو خطأ إشارة، أو خطأ في القانون، أو غيره. الملاحظات بالعربية الفصحى توضح ما كتبه الطالب وما هو الصواب ونوع الخطأ."
+          : "أنت مقيّم إجابات دقيق. لكل سؤال: أولاً انظر للجواب النهائي وقارنه بالمتوقع — إذا تطابقا درجة كاملة وانتهى. إذا لم يتطابقا اقرأ الإجابة كاملة كما هي وحدد نوع الخطأ. الملاحظات بالعربية الفصحى."
       }
     });
 
