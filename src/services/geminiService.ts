@@ -250,33 +250,34 @@ Required Questions Count: ${requiredQuestionsCount || 'All'}.
 For each question, follow this exact two-stage process:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STAGE 1 — LOOK AT THE FINAL ANSWER ONLY
+STAGE 1 — VERIFY THEN COMPARE FINAL ANSWER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find the student's final written result for this question.
-The final answer is: the last number/expression written, OR the boxed/circled value.
+Step A — Compute the correct answer yourself independently:
+  • Solve the question using the proper rules BEFORE looking at the student's answer.
+  • PEMDAS/BODMAS strictly: parentheses → exponents → ×÷ → +− (left to right).
+  • Example: (3+14)×2−6 → parentheses first: 17×2−6 → WRONG. Correct: 3+(14×2)−6 = 3+28−6 = 25.
+  • Store this as CORRECT_ANSWER. This is your ground truth.
 
-Read this final value as a RAW INK PATTERN — digit by digit, shape by shape.
-Do not interpret it mathematically. Do not validate it. Just read the last value.
+Step B — Read the student's final written value from the image:
+  • Find the last number the student wrote, or the boxed/circled value.
+  • Read it as raw ink — digit by digit. Do not interpret mathematically.
+  • Store this as STUDENT_FINAL.
 
-Compare this raw final value against the expected 'answer':
-✅ They match → full grade. Record studentAnswer = that final value. STOP here.
-❌ They do not match → proceed to Stage 2.
+Step C — Compare STUDENT_FINAL against CORRECT_ANSWER:
+  ✅ They match → full grade. studentAnswer = STUDENT_FINAL. STOP here.
+  ❌ They do not match → proceed to Stage 2.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STAGE 2 — ANALYSE THE FULL WORKING (only reached if Stage 1 failed)
+STAGE 2 — ANALYSE THE FULL WORKING (only if Stage 1 failed)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Now read the student's complete written work for this question — all steps.
-Record studentAnswer = the complete expression as written on the paper, digit by digit.
+Read the student's complete written work — all steps, digit by digit as raw ink.
+studentAnswer = the complete expression as written on the paper.
 
-⛔ While reading: treat every digit as an isolated ink shape — not a math value.
-   If ink shows "28" → record "28". If ink shows "34-6=28" → record "34-6=28".
-   Never alter a digit because the math "should" give a different result.
-
-Then identify the error type from this list:
+Identify the error type:
 ${isMath ? `
-  • ORDER_OF_OPERATIONS — student did not follow PEMDAS/BODMAS (×÷ before +−, parentheses first)
-  • ARITHMETIC_SLIP — correct method and order, but made a calculation mistake in one step
-  • WRONG_FORMULA — used the wrong formula or approach entirely
+  • ORDER_OF_OPERATIONS — violated PEMDAS/BODMAS (e.g. added before multiplying)
+  • ARITHMETIC_SLIP — correct method and order, wrong calculation in one step
+  • WRONG_FORMULA — used wrong formula or approach
   • SIGN_ERROR — mistake with negative/positive signs
   • INCOMPLETE — started correctly but did not finish
   • OTHER — describe clearly
@@ -286,7 +287,6 @@ ${isMath ? `
   • WRONG_CONCEPT — misunderstood the question
   • OTHER — describe clearly
 `}
-
 Assign partial grade based on how far the student got correctly before the error.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -294,9 +294,9 @@ OUTPUT — JSON only, no markdown:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
 
-• studentAnswer = final value if Stage 1 passed, or full working if Stage 2 reached.
-• grade = full if Stage 1 passed, partial or 0 based on error analysis in Stage 2.
-• feedback = Arabic (العربية الفصحى): if Stage 1 passed → brief praise. If Stage 2 → state what the student wrote, the error type, and what is correct.
+• studentAnswer = STUDENT_FINAL if Stage 1 passed, full working if Stage 2 reached.
+• grade = full if Stage 1 passed, partial or 0 based on Stage 2 error analysis.
+• feedback = Arabic (العربية الفصحى): Stage 1 pass → brief praise. Stage 2 → state what student wrote, error type, correct answer.
 • box = [ymin, xmin, ymax, xmax] location of student answer on page (0–1000 scale).
 • pageIndex = 0-based image index.`;
 
@@ -310,8 +310,8 @@ OUTPUT — JSON only, no markdown:
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مقيّم إجابات رياضية دقيق. لكل سؤال اتبع مرحلتين: المرحلة الأولى — انظر للجواب النهائي فقط (آخر رقم أو القيمة المحاطة بمستطيل) وقارنه بالجواب المتوقع. إذا تطابقا → درجة كاملة وانتهى. المرحلة الثانية (فقط عند عدم التطابق) — اقرأ خطوات الطالب كاملة رقماً رقماً كما هي بالحبر دون تغيير، ثم حدد نوع الخطأ: خطأ ترتيب عمليات، أو خطأ حسابي، أو خطأ إشارة، أو خطأ في القانون، أو غيره. الملاحظات بالعربية الفصحى توضح ما كتبه الطالب وما هو الصواب ونوع الخطأ."
-          : "أنت مقيّم إجابات دقيق. لكل سؤال: أولاً انظر للجواب النهائي وقارنه بالمتوقع — إذا تطابقا درجة كاملة وانتهى. إذا لم يتطابقا اقرأ الإجابة كاملة كما هي وحدد نوع الخطأ. الملاحظات بالعربية الفصحى."
+          ? "أنت مقيّم رياضيات دقيق. لكل سؤال: أولاً احسب الجواب الصحيح بنفسك بشكل مستقل قبل أن تنظر لإجابة الطالب — هذا هو مرجعك الوحيد. أولوية العمليات مطلقة: أقواس ثم أسس ثم ضرب وقسمة ثم جمع وطرح. ثانياً اقرأ الجواب النهائي للطالب من الورقة وقارنه بما حسبته أنت — إذا تطابقا درجة كاملة. إذا اختلفا اقرأ خطواته كاملة وحدد نوع الخطأ. الملاحظات بالعربية الفصحى توضح ما كتبه الطالب وما هو الصواب."
+          : "أنت مقيّم دقيق. لكل سؤال: أولاً حدد الجواب الصحيح من معرفتك. ثانياً اقرأ جواب الطالب النهائي وقارنه — إذا تطابق درجة كاملة، وإلا اقرأ إجابته كاملة وحدد الخطأ. الملاحظات بالعربية الفصحى."
       }
     });
 
