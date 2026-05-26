@@ -554,29 +554,45 @@ STEP 2 — IDENTIFY MODEL'S FINAL VALUE:
   If no "=": MODEL_FINAL = the full 'answer' field trimmed.
   DO NOT COMPUTE. Just read the string.
 
-STEP 3 — COMPARE AS STRINGS (allow Arabic/Western digit equivalence):
+STEP 3 — COMPARE FINAL VALUES (quick check):
   Normalize: convert Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) to Western (0-9) for comparison only.
   Are STUDENT_FINAL and MODEL_FINAL numerically equal?
-  ✅ YES → full grade. studentAnswer = STUDENT_FINAL. Done.
+  ✅ YES → might be correct, BUT proceed to Step 3b to check steps
   ❌ NO  → go to Step 4.
 
-STEP 4 — LOCATE DIVERGENCE (only if Step 3 failed):
+STEP 3b — CHECK WORKING STEPS (CRITICAL FOR MATH):
+  ${isMath ? `ONLY if answers match in Step 3, NOW check the working/steps:
+  - If studentRawText has multiple lines (e.g., "3×4=10 | 10+2=12"):
+    Compare EACH step against the model answer's steps.
+    Do the steps follow the SAME path? 
+    Do they use the SAME operations in the SAME order?
+  - If at ANY intermediate step the student's value differs from model's step:
+    → This is STEP ERROR. The final answer match is accidental/lucky.
+    → Grade 0 or partial (depending on how early the error occurs).
+  - Examples:
+    ❌ Student: "3×4=10 | 10+2=12" vs Model: "3×4=12 | 12+0=12"
+       → Step 1 diverges (3×4 student says 10, model says 12) → ERROR
+    ✅ Student: "3×4=12 | 12×1=12" vs Model: "3×4=12 | 12×1=12"  
+       → All steps match → CORRECT` : ``}
+
+STEP 4 — LOCATE DIVERGENCE (if final values don't match OR steps diverge):
 ${isMath ? `  Compare studentRawText steps against 'answer' steps to find FIRST divergence point.
   ① ORDER_OF_OPERATIONS: student applied lower-priority op before higher-priority? → grade 0.
   ② SIGN_ERROR: wrong operator (+−×÷√) at correct position? → partial grade (50%).
-  ③ ARITHMETIC_SLIP: correct operator, wrong computed result at one step? → deduct 1 mark max.
+  ③ ARITHMETIC_SLIP: correct operator, wrong computed result at one step? → grade 0 (wrong step).
   ④ WRONG_METHOD: completely different approach? → 0 or based on validity.
-  ⑤ INCOMPLETE: stopped mid-way? → partial for correct steps done.`
+  ⑤ INCOMPLETE: stopped mid-way? → partial for correct steps done.
+  ⑥ LUCKY_GUESS: final answer right but steps are wrong? → grade 0 (lucky, not learned).`
     : `  Compare meaning of studentRawText with expected answer. Partial credit proportionally.`}
 
 Output JSON only:
 {"results":[{"studentName":"${studentName}","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[0,0,0,0],"pageIndex":0}]}]}
 
-- studentAnswer: STUDENT_FINAL (Step 2 pass) or full studentRawText (Step 4 reached).
-- grade: full (Step 3 pass) or 0/partial (Step 4).
+- studentAnswer: STUDENT_FINAL (Step 3 + 3b pass) or full studentRawText (Step 4 reached).
+- grade: full (Step 3 + 3b pass) or 0/partial (Step 4).
 - feedback: Arabic (العربية الفصحى).
-  Step 3 pass → brief praise.
-  Step 4 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. الخطأ: [وصف دقيق لنقطة الانحراف]."
+  Step 3 + 3b pass → brief praise.
+  Step 4 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. الخطأ: [وصف دقيق لنقطة الانحراف]. الحل الصحيح: [شرح الخطوات الصحيحة]."
 - box/pageIndex: set to 0.`;
 
     const compareResponse = await ai.models.generateContent({
