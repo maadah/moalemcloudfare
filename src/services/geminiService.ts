@@ -211,6 +211,139 @@ export async function gradeStudentPaper(
 
     if (onProgress) onProgress(0, 100, 'grading');
     const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
+
+    const prompt = `You are evaluating a student's handwritten exam paper image.
+
+Subject: ${subject}.
+Questions and model answers: ${JSON.stringify(flattenedQuestions)}.
+Total Max Grade: ${totalExamGrade}.
+Required Questions Count: ${requiredQuestionsCount || 'All'}.
+
+For each question follow these steps EXACTLY:
+
+STEP 1 — READ THE STUDENT'S FINAL WRITTEN VALUE
+Find the student's answer area for this question in the image.
+Read ONLY the final value — the last number written, or the boxed/circled value.
+Store it as STUDENT_FINAL. Do not compute. Do not verify. Just read.
+
+STEP 2 — READ THE MODEL ANSWER FINAL VALUE
+Look at the 'answer' field for this question in the JSON above.
+Read ONLY the final numeric result from it.
+Store it as MODEL_FINAL. Do not compute. Just read.
+
+STEP 3 — COMPARE AS TEXT STRINGS
+Compare STUDENT_FINAL and MODEL_FINAL character by character as plain text.
+${isMath ? `
+Are they the same string?
+✅ YES → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
+❌ NO  → go to Step 4.
+
+STEP 4 — FIND WHERE THE STUDENT'S WORK DIVERGED FROM THE MODEL ANSWER
+Now read the student's FULL working from the image and the model answer's full steps.
+You are looking for the FIRST STEP where the student's written work differs from the model answer.
+
+Compare step by step — starting from step 1:
+- What operation did the model answer perform first?
+- What operation did the student perform first?
+- Are they the same operation on the same numbers?
+
+If they differ at step N:
+→ That is the divergence point.
+→ All steps after that are irrelevant — they are consequences of the wrong step.
+→ Grade based on how many steps before N were correct.
+→ ORDER error (wrong operation order) = 0 grade.
+→ SIGN error (wrong +/−/×/÷/√) = partial grade.
+→ ARITHMETIC error (right operation, wrong calculation) = deduct 1 mark max.
+→ WRONG METHOD = 0 or based on validity.
+→ INCOMPLETE = partial for steps completed correctly.
+` : `
+✅ Match → full grade.
+❌ No match → compare student answer meaning with model answer. Partial credit proportionally.
+`}
+
+OUTPUT — JSON only:
+{"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
+
+• studentAnswer = STUDENT_FINAL if Step 3 passed, or full working if Step 4 reached.
+• grade = full (Step 3) or based on divergence analysis (Step 4).
+• feedback = Arabic (العربية الفصحى):
+  Step 3 pass → brief praise.
+  Step 4 → "الطالب كتب [STUDENT_FINAL]، الجواب النموذجي [MODEL_FINAL]. في الخطوة [N]: الطالب كتب [ما كتبه] بينما الجواب النموذجي يبدأ بـ [ما يجب]. [نوع الخطأ]."
+• box = [ymin,xmin,ymax,xmax] student answer location (0–1000).
+• pageIndex = 0-based image index.`;
+
+    const parts: any[] = base64ImagesData.map(data => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+    parts.push({ text: prompt });
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: { parts },
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0,
+        systemInstruction: isMath
+          ? "أنت مقيّم امتحانات. لكل سؤال رياضي: اقرأ الرقم النهائي للطالب من الورقة، واقرأ الرقم النهائي من الجواب النموذجي في JSON، وقارنهما كنصين حرفياً. إن تطابقا درجة كاملة. إن اختلفا: ابحث في أول خطوة كتبها الطالب وقارنها بأول خطوة في الجواب النموذجي — هل أجرى نفس العملية على نفس الأرقام؟ حدد أول نقطة اختلاف واحكم منها. لا تحل أي معادلة بنفسك. الملاحظات بالعربية الفصحى."
+          : "أنت مقيّم امتحانات. اقرأ جواب الطالب النهائي وقارنه بالجواب النموذجي. إن تطابقا درجة كاملة. إن اختلفا حدد الفرق وامنح الدرجة المناسبة. الملاحظات بالعربية الفصحى."
+      }
+    });
+
+    if (onProgress) onProgress(100, 100, 'grading');
+
+    const data = JSON.parse(cleanJson(response.text || '{}'));
+    const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
+
+    return {
+      results: results.map((r: any) => {
+        const gradingsWithMax = (r.gradings || []).map((g: any) => ({
+          ...g,
+          maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
+        }));
+        const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
+        return { ...r, gradings: gradingsWithMax, totalGrade: computedTotal };
+      })
+    };
+  } catch (error: any) {
+    console.error("Grading error:", error);
+    throw new Error(friendlyError(error));
+  }
+}
+  imageUrls: string[],
+  questions: Question[],
+  totalExamGrade: number,
+  requiredQuestionsCount: number,
+  subject: string = "عام",
+  onProgress?: (current: number, total: number, phase: 'compressing' | 'grading') => void
+): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
+  try {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error(getApiKeyErrorMessage());
+    const ai = new GoogleGenAI({ apiKey });
+
+    if (onProgress) onProgress(0, imageUrls.length, 'compressing');
+    const base64ImagesData: string[] = [];
+    for (let i = 0; i < imageUrls.length; i++) {
+      base64ImagesData.push(await compressImage(imageUrls[i], 2000, 2000, 0.85));
+      if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
+    }
+
+    const flattenedQuestions: any[] = [];
+    const flatten = (qs: Question[], parentText: string = "", path: string = "") => {
+      qs.forEach((q, index) => {
+        let label = q.text.split(/[:\-\.\/\(\)\[\]]/)[0].trim();
+        if (label.length > 15 || label.length === 0) label = `سؤال ${index + 1}`;
+        const fullPath = path ? `${path} / ${label}` : label;
+        const combinedText = parentText ? `${parentText} - ${q.text}` : q.text;
+        if (!q.subQuestions || q.subQuestions.length === 0) {
+          flattenedQuestions.push({ id: q.id, label: fullPath, text: combinedText, answer: q.answer, grade: q.grade, type: q.type });
+        } else {
+          flatten(q.subQuestions, combinedText, fullPath);
+        }
+      });
+    };
+    flatten(questions);
+
+    if (onProgress) onProgress(0, 100, 'grading');
+    const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
     const imageParts: any[] = base64ImagesData.map(data => ({ inlineData: { data, mimeType: "image/jpeg" } }));
 
     // ─────────────────────────────────────────────────────────────────────
