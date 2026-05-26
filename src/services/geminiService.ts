@@ -1,5 +1,51 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Friendly error messages — converts raw API errors to readable Arabic text
+// Keys are sanitized and never exposed to the user
+// ─────────────────────────────────────────────────────────────────────────────
+const friendlyError = (error: unknown): string => {
+  const raw = error instanceof Error ? error.message : String(error);
+
+  // Sanitize — remove any API key patterns before logging or displaying
+  const safe = raw
+    .replace(/AIza[A-Za-z0-9_\-]{30,}/g, 'AIza***')
+    .replace(/api[_-]?key[:\s'"]+[A-Za-z0-9_\-]{10,}/gi, 'api_key:***')
+    .replace(/sk-[A-Za-z0-9_\-]{20,}/g, 'sk-***');
+
+  // Parse error code from JSON if present
+  let code: number | null = null;
+  try {
+    const m = raw.match(/\{[\s\S]*"error"[\s\S]*\}/);
+    if (m) code = JSON.parse(m[0])?.error?.code ?? null;
+  } catch { /* */ }
+
+  if (raw.includes('suspended') || raw.includes('Permission denied'))
+    return '🚫 مفتاح API موقوف. افتح الإعدادات (⚙️) وأدخل مفتاحاً جديداً.';
+  if (code === 503 || raw.includes('high demand') || raw.includes('UNAVAILABLE'))
+    return '🔄 الخادم مشغول حالياً بسبب الضغط العالي. انتظر دقيقة أو دقيقتين ثم أعد المحاولة.';
+  if (code === 429 || raw.includes('quota') || raw.includes('rate limit') || raw.includes('RESOURCE_EXHAUSTED'))
+    return '⏳ تم تجاوز حد الاستخدام اليومي. انتظر بضع دقائق ثم أعد المحاولة.';
+  if (code === 401 || raw.includes('UNAUTHENTICATED') || raw.includes('Unauthorized'))
+    return '🔑 مفتاح API غير صحيح أو منتهي الصلاحية. افتح الإعدادات (⚙️) وتأكد من المفتاح.';
+  if (code === 403 || raw.includes('Forbidden'))
+    return '⛔ المفتاح لا يملك صلاحية استخدام هذا النموذج.';
+  if (code === 400 || raw.includes('INVALID_ARGUMENT'))
+    return '⚠️ خطأ في البيانات المُرسلة. تأكد من وضوح الصور وأعد المحاولة.';
+  if (code === 500 || raw.includes('INTERNAL'))
+    return '🛠️ خطأ داخلي في خادم Gemini. أعد المحاولة بعد لحظات.';
+  if (raw.includes('Failed to fetch') || raw.includes('NetworkError'))
+    return '🌐 انقطع الاتصال بالإنترنت. تحقق من اتصالك وأعد المحاولة.';
+  if (raw.includes('JSON') || raw.includes('SyntaxError'))
+    return '📄 فشل في قراءة نتيجة العملية. أعد المحاولة أو قلّل عدد الصور.';
+  if (raw.includes('timeout') || raw.includes('AbortError'))
+    return '⌛ انتهت مهلة الطلب. قلّل عدد الصور وأعد المحاولة.';
+
+  // Fallback — log sanitized version to console, show generic message to user
+  console.error('[geminiService] Unhandled error:', safe);
+  return '❌ حدث خطأ غير متوقع. أعد المحاولة، وإذا استمر تحقق من إعدادات مفتاح API.';
+};
+
 export interface Question {
   id: string;
   text: string;
@@ -101,7 +147,7 @@ export async function extractExamFromDualImages(
     return data || { title: "", questions: [] };
   } catch (error) {
     console.error("Extraction error:", error);
-    throw error;
+    throw new Error(friendlyError(error));
   }
 }
 
@@ -148,7 +194,7 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     return data || { title: "", questions: [] };
   } catch (error) {
     console.error("Extraction error:", error);
-    throw error;
+    throw new Error(friendlyError(error));
   }
 }
 
@@ -288,7 +334,7 @@ OUTPUT — JSON only, no markdown:
     };
   } catch (error: any) {
     console.error("Grading error:", error);
-    throw error;
+    throw new Error(friendlyError(error));
   }
 }
 
