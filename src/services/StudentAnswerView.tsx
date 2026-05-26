@@ -2,27 +2,43 @@ import React, { useState } from 'react';
 import type { GradingResult } from './geminiService';
 
 interface Props {
-  grading: GradingResult;
+  grading: GradingResult & { maxGrade?: number };
 }
 
 /**
  * Shows the student's transcribed answer next to the cropped image of their actual handwriting.
- * This lets the teacher visually verify that the transcription matches what the student wrote.
+ * Highlights answers that the verification pass flagged as mismatches.
  */
 export const StudentAnswerView: React.FC<Props> = ({ grading }) => {
   const [showFullSize, setShowFullSize] = useState(false);
 
   const hasImage = !!grading.studentAnswerImage;
   const imageSrc = hasImage ? `data:image/jpeg;base64,${grading.studentAnswerImage}` : null;
+  const flagged = !!grading.needsReview;
 
   return (
     <div style={{
-      border: '1px solid #e0e0e0',
+      border: flagged ? '2px solid #f57c00' : '1px solid #e0e0e0',
       borderRadius: 8,
       padding: 12,
       marginBottom: 10,
-      backgroundColor: '#fafafa'
+      backgroundColor: flagged ? '#fff8e1' : '#fafafa'
     }}>
+      {flagged && (
+        <div style={{
+          padding: '8px 12px',
+          marginBottom: 10,
+          backgroundColor: '#ffe0b2',
+          border: '1px solid #f57c00',
+          borderRadius: 6,
+          fontSize: 13,
+          color: '#e65100',
+          fontWeight: 'bold'
+        }}>
+          ⚠️ تنبيه: التحقق البصري اكتشف عدم تطابق — يحتاج مراجعة المعلم
+        </div>
+      )}
+
       {/* Transcribed text */}
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
@@ -55,7 +71,7 @@ export const StudentAnswerView: React.FC<Props> = ({ grading }) => {
             style={{
               maxWidth: showFullSize ? '100%' : 320,
               maxHeight: showFullSize ? 600 : 120,
-              border: '2px solid #4caf50',
+              border: flagged ? '2px solid #f57c00' : '2px solid #4caf50',
               borderRadius: 6,
               cursor: 'pointer',
               backgroundColor: '#fff',
@@ -68,7 +84,7 @@ export const StudentAnswerView: React.FC<Props> = ({ grading }) => {
         </div>
       )}
 
-      {/* Grade and feedback */}
+      {/* Grade */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
         <div style={{
           padding: '4px 10px',
@@ -78,7 +94,7 @@ export const StudentAnswerView: React.FC<Props> = ({ grading }) => {
           fontWeight: 'bold',
           fontSize: 14
         }}>
-          {grading.grade} / {(grading as any).maxGrade ?? '?'}
+          {grading.grade} / {grading.maxGrade ?? '?'}
         </div>
       </div>
 
