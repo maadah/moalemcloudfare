@@ -59,6 +59,7 @@ export interface GradingResult {
   feedback: string;
   box?: [number, number, number, number];
   pageIndex?: number;
+  studentAnswerImage?: string; // base64 JPEG crop of the student's answer area (without data: prefix)
 }
 
 const getApiKey = () => {
@@ -108,6 +109,50 @@ function fixInlineSubQuestions(q: any, parentId?: string, level: number = 1): an
     return { ...q, id, subQuestions: q.subQuestions.map((sq: any, i: number) => fixInlineSubQuestions(sq, `${id}_${i}`, level + 1)) };
   }
   return { ...q, id };
+}
+
+/**
+ * Crops a region from a base64 image using box coordinates in 0–1000 scale (Gemini convention).
+ * box = [ymin, xmin, ymax, xmax].
+ * Returns a base64 JPEG (without data: prefix) of just the cropped region.
+ */
+async function cropAnswerRegion(
+  base64Image: string,
+  box: [number, number, number, number],
+  padding: number = 20
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${base64Image}`;
+    img.onload = () => {
+      try {
+        const [ymin, xmin, ymax, xmax] = box;
+        // Convert 0–1000 normalized coords to actual pixels, with padding
+        const px = (v: number, max: number) => Math.max(0, Math.min(max, Math.round((v / 1000) * max)));
+        let x1 = px(xmin, img.width) - padding;
+        let y1 = px(ymin, img.height) - padding;
+        let x2 = px(xmax, img.width) + padding;
+        let y2 = px(ymax, img.height) + padding;
+        x1 = Math.max(0, x1);
+        y1 = Math.max(0, y1);
+        x2 = Math.min(img.width, x2);
+        y2 = Math.min(img.height, y2);
+        const w = Math.max(1, x2 - x1);
+        const h = Math.max(1, y2 - y1);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Could not get canvas context for crop'));
+        ctx.drawImage(img, x1, y1, w, h, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error('فشل في تحميل الصورة للاقتصاص'));
+  });
 }
 
 export async function extractExamFromDualImages(
@@ -351,10 +396,10 @@ export async function gradeMultipleStudents(
     // ─────────────────────────────────────────────────────────────────────
     const questionLabels = flattenedQuestions.map(q => ({ id: q.id, label: q.label }));
 
-    const transcribePrompt = `You are a DUMB optical scanner with zero math knowledge. You convert ink to text.
+    const transcribePrompt = `You are a DUMB optical scanner with zero math knowledge. You convert ink to text AND locate it on the page.
 
 For each question label listed here: ${JSON.stringify(questionLabels)}
-Find the handwritten answer area for that question and copy EVERY ink mark exactly.
+Find the handwritten answer area for that question and copy EVERY ink mark exactly, AND mark its location.
 
 ABSOLUTE RULES — VIOLATION = SYSTEM FAILURE:
 1. YOU HAVE NO MATH KNOWLEDGE. You cannot add, subtract, multiply, divide, or evaluate anything.
@@ -364,18 +409,30 @@ ABSOLUTE RULES — VIOLATION = SYSTEM FAILURE:
 5. The = sign and what follows it is PART OF THE ANSWER. Never replace the value after = with a computed result.
 6. [BOXED: value] — student circled or boxed a final answer.
 7. Crossed-out text: skip it.
-8. Blank area: write "BLANK".
+8. Blank area: write "BLANK" and box = [0,0,0,0].
 9. Unclear ink: copy best guess + "?".
 10. Multi-line working: copy ALL lines in order, separated by " | ".
 
-CRITICAL: You are copying INK SHAPES. 3×4=10 has three ink shapes after = : "1" and "0". Copy "10". Not "12".
+CRITICAL: You are copying INK SHAPES. 3×4=10 has two ink shapes after = : "1" and "0". Copy "10". Not "12".
+
+BOUNDING BOX RULES:
+- For each answer, return its location as box = [ymin, xmin, ymax, xmax] in 0–1000 normalized coordinates.
+- The box must tightly contain ALL of the student's handwritten work for that question (including all lines and the final answer).
+- pageIndex = 0-based index of the image where the answer is found.
 
 Output JSON only:
-{"studentName": "...", "transcriptions": [{"id": "...", "rawText": "..."}]}
+{
+  "studentName": "...",
+  "transcriptions": [
+    {"id": "...", "rawText": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": 0}
+  ]
+}
 
 - studentName: student's name from paper, otherwise "طالب".
 - id: must match exactly from question labels list.
-- rawText: every ink mark in the answer area, copied character by character, exactly as written.`;
+- rawText: every ink mark in the answer area, copied character by character.
+- box: [ymin, xmin, ymax, xmax] tight bounding box around the answer ink, 0–1000 scale.
+- pageIndex: 0-based image index containing this answer.`;
 
     const transcribeResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -389,12 +446,36 @@ Output JSON only:
 
     const transcribeData = JSON.parse(cleanJson(transcribeResponse.text || '{}'));
     const studentName: string = transcribeData.studentName || 'طالب غير معروف';
-    const transcriptions: { id: string, rawText: string }[] = transcribeData.transcriptions || [];
+    const transcriptions: { id: string, rawText: string, box?: [number, number, number, number], pageIndex?: number }[] = transcribeData.transcriptions || [];
 
-    const questionsWithRaw = flattenedQuestions.map(q => ({
-      ...q,
-      studentRawText: transcriptions.find(t => t.id === q.id)?.rawText || 'BLANK'
-    }));
+    // Crop each answer region from the original images so the user can visually verify the transcription.
+    const answerCrops: Record<string, string> = {};
+    await Promise.all(
+      transcriptions.map(async (t) => {
+        if (!t.box || !Array.isArray(t.box) || t.box.length !== 4) return;
+        const [ymin, xmin, ymax, xmax] = t.box;
+        // Skip degenerate boxes (e.g. BLANK answers)
+        if (ymax <= ymin || xmax <= xmin) return;
+        const pageIndex = typeof t.pageIndex === 'number' ? t.pageIndex : 0;
+        const sourceImage = base64ImagesData[pageIndex] || base64ImagesData[0];
+        if (!sourceImage) return;
+        try {
+          answerCrops[t.id] = await cropAnswerRegion(sourceImage, t.box, 24);
+        } catch (e) {
+          console.warn(`[crop] failed for question ${t.id}:`, e);
+        }
+      })
+    );
+
+    const questionsWithRaw = flattenedQuestions.map(q => {
+      const t = transcriptions.find(tr => tr.id === q.id);
+      return {
+        ...q,
+        studentRawText: t?.rawText || 'BLANK',
+        _box: t?.box,
+        _pageIndex: t?.pageIndex
+      };
+    });
 
     // ─────────────────────────────────────────────────────────────────────
     // CALL 2 — COMPARISON ONLY (text only, no images)
@@ -406,7 +487,7 @@ Output JSON only:
 Subject: ${subject}.
 Student name: ${studentName}.
 Questions with expected answers and transcribed student text:
-${JSON.stringify(questionsWithRaw)}
+${JSON.stringify(questionsWithRaw.map(({ _box, _pageIndex, ...rest }) => rest))}
 Total Max Grade: ${totalExamGrade}.
 Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
@@ -473,10 +554,17 @@ Output JSON only:
 
     return {
       results: results.map((r: any) => {
-        const gradingsWithMax = (r.gradings || []).map((g: any) => ({
-          ...g,
-          maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
-        }));
+        const gradingsWithMax = (r.gradings || []).map((g: any) => {
+          const transcription = transcriptions.find(t => t.id === g.questionId);
+          return {
+            ...g,
+            maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0,
+            // Attach the cropped image of the student's handwriting so the user can verify visually.
+            studentAnswerImage: answerCrops[g.questionId] || undefined,
+            box: transcription?.box || g.box,
+            pageIndex: transcription?.pageIndex ?? g.pageIndex ?? 0
+          };
+        });
         const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
         return { ...r, gradings: gradingsWithMax, totalGrade: computedTotal };
       })
