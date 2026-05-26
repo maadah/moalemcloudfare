@@ -247,71 +247,69 @@ Questions with expected answers: ${JSON.stringify(flattenedQuestions)}.
 Total Max Grade: ${totalExamGrade}.
 Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
-For each question follow this process STRICTLY:
+For each question follow these steps in order:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP A — SOLVE IT YOURSELF FIRST (before looking at the student paper)
+STEP 1 — READ THE STUDENT'S FINAL VALUE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Read the question text and solve it yourself using correct mathematical rules.
-PEMDAS/BODMAS: parentheses → exponents → ×÷ (left to right) → +− (left to right).
-Write out every step mentally and reach CORRECT_ANSWER.
-This is your ground truth. The student's work cannot change it.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP B — READ THE STUDENT'S FINAL VALUE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find the last number the student wrote, or the boxed/circled value.
-Read it as raw digits only — do not interpret mathematically.
+Find the last number/value the student wrote, or the boxed/circled value.
+Read it as raw digits — do not interpret or alter.
 Store as STUDENT_FINAL.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP C — COMPARE
+STEP 2 — COMPARE FINAL VALUE WITH MODEL ANSWER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Does STUDENT_FINAL equal CORRECT_ANSWER?
-✅ YES → full grade. studentAnswer = STUDENT_FINAL. Skip Step D.
-❌ NO  → go to Step D.
+Compare STUDENT_FINAL with the 'answer' field from the JSON.
+
+✅ They match → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
+❌ They do not match → go to Step 3.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP D — VERIFY EACH STUDENT STEP INDEPENDENTLY (only if Step C failed)
+STEP 3 — COMPARE STUDENT STEPS WITH MODEL ANSWER STEPS (only if Step 2 failed)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Read the student's full working from the image, step by step.
+Read the student's complete working from the image — all steps as written.
 studentAnswer = copy everything written, digit by digit as raw ink.
 
-For EACH step the student wrote, YOU calculate that step yourself independently:
-- Do NOT trust the student's result for any step.
-- Calculate the result of each operation yourself, then compare to what the student wrote.
-- Example: student writes "3 + 14 = 17" → you calculate 3+14=17 ✓ correct step.
-- Example: student writes "17 × 2 = 34" → you calculate 17×2=34 ✓ correct step.
-- Example: student writes "34 - 6 = 28" → you calculate 34-6=28 ✓ correct step.
-- BUT THEN check: was the ORDER OF OPERATIONS respected from the start?
-  If the student did addition before multiplication when they should not have → ORDER_OF_OPERATIONS error.
-  The individual step arithmetic may be correct, but the ORDER was wrong from step 1.
+Now compare the student's steps against the model answer steps one by one:
 
 ${isMath ? `
-Error types to identify:
-• ORDER_OF_OPERATIONS — wrong sequence of operations (e.g. added before multiplying)
-• ARITHMETIC_SLIP — correct order and method, wrong arithmetic in one step  
-• WRONG_FORMULA — used wrong formula or approach
-• SIGN_ERROR — wrong negative/positive sign
-• INCOMPLETE — did not finish
-• OTHER — describe
+CHECK these specific elements in order — compare student vs model answer:
+
+1. ORDER OF OPERATIONS: Did the student apply the same operation sequence as the model answer?
+   (parentheses first, then × ÷, then + −). If order differs → ORDER_OF_OPERATIONS error.
+
+2. SIGNS: Compare every +, −, ×, ÷, √ sign the student used vs the model answer.
+   Any sign mismatch → SIGN_ERROR.
+
+3. ARITHMETIC: For each step, does the student's calculated value match what that step should produce?
+   (compare step result vs model answer's same step result). If differs → ARITHMETIC_SLIP.
+
+4. FORMULA/METHOD: Did the student use the same approach as the model answer?
+   If completely different method → WRONG_FORMULA.
+
+5. COMPLETENESS: Did the student finish all steps? If stopped early → INCOMPLETE.
+
+Grade based on where the error first occurred:
+- Error in step 1 (order of operations) → 0
+- Error only in final arithmetic step → deduct 1 mark max
+- Partially correct steps → proportional partial grade
 ` : `
-Error types:
-• FACTUAL_ERROR — wrong fact or concept
-• INCOMPLETE — partially answered
-• WRONG_CONCEPT — misunderstood the question
-• OTHER — describe
+Compare student answer to model answer:
+- Full match in meaning → full grade
+- Partial match → proportional grade  
+- Wrong → 0
 `}
-Grade: 0 if order of operations violated. Partial if minor arithmetic slip only.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT — JSON only, no markdown:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {"results":[{"studentName":"...","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[ymin,xmin,ymax,xmax],"pageIndex":number}]}]}
 
-• studentAnswer = STUDENT_FINAL if Step C passed, full working if Step D reached.
-• grade = full if Step C passed, 0 or partial from Step D analysis.
-• feedback = Arabic (العربية الفصحى): Step C pass → brief praise. Step D → state what student wrote, which step had the error, error type, and correct answer.
+• studentAnswer = STUDENT_FINAL (Step 2 pass) or full working (Step 3).
+• grade = full (Step 2) or 0/partial (Step 3).
+• feedback = Arabic (العربية الفصحى):
+  - Step 2 pass → brief praise.
+  - Step 3 → state exactly: what the student wrote, which element was wrong (order/sign/arithmetic/formula), what the model answer shows, and the grade reason.
 • box = [ymin, xmin, ymax, xmax] location of student answer (0–1000 scale).
 • pageIndex = 0-based image index.`;
 
@@ -325,8 +323,8 @@ OUTPUT — JSON only, no markdown:
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مقيّم رياضيات صارم. لكل سؤال: أولاً احسب الجواب الصحيح بنفسك بشكل مستقل تام قبل أن تنظر لأي شيء في ورقة الطالب — هذا هو مرجعك الثابت الذي لا تغيره. ثانياً قارن الجواب النهائي للطالب بجوابك — إن تطابقا درجة كاملة. إن اختلفا: اقرأ كل خطوة كتبها الطالب واحسبها أنت بشكل مستقل — لا تثق بنتيجة الطالب في أي خطوة بل احسبها أنت. تحقق من أمرين: (١) هل ترتيب العمليات صحيح؟ أقواس ثم أسس ثم ضرب وقسمة ثم جمع وطرح — أي مخالفة هنا تعني خطأ في الأساس وليس خطأً حسابياً. (٢) هل العمليات الحسابية في كل خطوة صحيحة؟ ابدأ من الخطوة الأولى ولا تتأثر بسلاسة الخطوات اللاحقة. الملاحظات بالعربية الفصحى توضح أين الخطأ بالضبط."
-          : "أنت مقيّم دقيق. لكل سؤال: أولاً حدد الجواب الصحيح من معرفتك. ثانياً قارن جواب الطالب النهائي — إن تطابق درجة كاملة. إن اختلف اقرأ إجابته كاملة وحدد الخطأ بدقة. الملاحظات بالعربية الفصحى."
+          ? "أنت مقيّم رياضيات صارم. لكل سؤال: أولاً اقرأ الجواب النهائي للطالب وقارنه بالجواب النموذجي — إن تطابقا درجة كاملة وانتهى. إن اختلفا: اقرأ خطوات الطالب كاملة وقارنها بخطوات الجواب النموذجي خطوة بخطوة — تحقق من: (١) ترتيب العمليات هل يطابق الجواب النموذجي؟ (٢) الإشارات +−×÷√ هل تطابق الجواب النموذجي؟ (٣) النتائج الحسابية في كل خطوة هل تطابق الجواب النموذجي؟ (٤) الطريقة والقانون المستخدم. أعط الدرجة بناءً على أول خطأ وجدته. الملاحظات بالعربية الفصحى توضح بالضبط أين الخطأ."
+          : "أنت مقيّم دقيق. لكل سؤال: اقرأ جواب الطالب النهائي وقارنه بالجواب النموذجي — إن تطابق درجة كاملة. إن اختلف قارن إجابته بالجواب النموذجي وحدد الفرق. الملاحظات بالعربية الفصحى."
       }
     });
 
