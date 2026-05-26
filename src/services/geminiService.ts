@@ -219,46 +219,42 @@ Questions and model answers: ${JSON.stringify(flattenedQuestions)}.
 Total Max Grade: ${totalExamGrade}.
 Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
+WARNING — MOST IMPORTANT RULE:
+You must read the student's written answer EXACTLY as ink on paper. Never compute or verify arithmetic.
+If the student wrote "3×4=10", STUDENT_FINAL = 10 (not 12). If they wrote "15÷3=6", STUDENT_FINAL = 6 (not 5).
+The value after the last "=" is the student's answer. Copy it. Do not evaluate it.
+
 For each question follow these steps EXACTLY:
 
-STEP 1 — READ THE STUDENT'S FINAL WRITTEN VALUE
-Find the student's answer area for this question in the image.
-Read ONLY the final value — the last number written, or the boxed/circled value.
-Store it as STUDENT_FINAL. Do not compute. Do not verify. Just read.
+STEP 1 — READ STUDENT'S FINAL WRITTEN VALUE
+Find the answer area for this question in the image.
+STUDENT_FINAL = the ink value after the last "=" sign written by the student.
+If student circled/boxed a value → [BOXED: value] = STUDENT_FINAL.
+Do NOT compute. Do NOT verify. The ink shape after = is STUDENT_FINAL.
 
-STEP 2 — READ THE MODEL ANSWER FINAL VALUE
-Look at the 'answer' field for this question in the JSON above.
-Read ONLY the final numeric result from it.
-Store it as MODEL_FINAL. Do not compute. Just read.
+STEP 2 — READ MODEL ANSWER FINAL VALUE
+MODEL_FINAL = value after the last "=" in the 'answer' field. Do NOT compute. Just read.
 
 STEP 3 — COMPARE AS TEXT STRINGS
-Compare STUDENT_FINAL and MODEL_FINAL character by character as plain text.
+Normalize Arabic-Indic digits (٠-٩) to Western (0-9) for comparison only.
+Are STUDENT_FINAL and MODEL_FINAL numerically equal?
 ${isMath ? `
-Are they the same string?
-✅ YES → full grade. studentAnswer = STUDENT_FINAL. Go to OUTPUT.
+✅ YES → full grade. studentAnswer = STUDENT_FINAL. Done.
 ❌ NO  → go to Step 4.
 
-STEP 4 — FIND WHERE THE STUDENT'S WORK DIVERGED FROM THE MODEL ANSWER
-Now read the student's FULL working from the image and the model answer's full steps.
-You are looking for the FIRST STEP where the student's written work differs from the model answer.
+STEP 4 — FIND WHERE STUDENT'S WORK DIVERGED FROM MODEL ANSWER
+Read the student's FULL written working (all lines) and compare step-by-step with model answer.
+Find the FIRST step where the student's written work differs from the model answer.
 
-Compare step by step — starting from step 1:
-- What operation did the model answer perform first?
-- What operation did the student perform first?
-- Are they the same operation on the same numbers?
-
-If they differ at step N:
-→ That is the divergence point.
-→ All steps after that are irrelevant — they are consequences of the wrong step.
-→ Grade based on how many steps before N were correct.
-→ ORDER error (wrong operation order) = 0 grade.
-→ SIGN error (wrong +/−/×/÷/√) = partial grade.
-→ ARITHMETIC error (right operation, wrong calculation) = deduct 1 mark max.
-→ WRONG METHOD = 0 or based on validity.
-→ INCOMPLETE = partial for steps completed correctly.
+Error types:
+① ORDER_OF_OPERATIONS: student applied +/− before ×/÷ when they shouldn't → grade 0.
+② SIGN_ERROR: wrong operator at a step → partial grade (50%).
+③ ARITHMETIC_SLIP: right operator, wrong computed result at one step → deduct 1 mark max.
+④ WRONG_METHOD: completely different approach → 0 or based on validity.
+⑤ INCOMPLETE: stopped before finishing → partial for correct steps done.
 ` : `
 ✅ Match → full grade.
-❌ No match → compare student answer meaning with model answer. Partial credit proportionally.
+❌ No match → compare meaning of student answer with model answer. Partial credit proportionally.
 `}
 
 OUTPUT — JSON only:
@@ -268,7 +264,7 @@ OUTPUT — JSON only:
 • grade = full (Step 3) or based on divergence analysis (Step 4).
 • feedback = Arabic (العربية الفصحى):
   Step 3 pass → brief praise.
-  Step 4 → "الطالب كتب [STUDENT_FINAL]، الجواب النموذجي [MODEL_FINAL]. في الخطوة [N]: الطالب كتب [ما كتبه] بينما الجواب النموذجي يبدأ بـ [ما يجب]. [نوع الخطأ]."
+  Step 4 → "الطالب كتب [STUDENT_FINAL]، الجواب النموذجي [MODEL_FINAL]. في الخطوة [N]: الطالب كتب [ما كتبه] بينما الصواب [ما يجب]. [نوع الخطأ]."
 • box = [ymin,xmin,ymax,xmax] student answer location (0–1000).
 • pageIndex = 0-based image index.`;
 
@@ -282,8 +278,8 @@ OUTPUT — JSON only:
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مقيّم امتحانات. لكل سؤال رياضي: اقرأ الرقم النهائي للطالب من الورقة، واقرأ الرقم النهائي من الجواب النموذجي في JSON، وقارنهما كنصين حرفياً. إن تطابقا درجة كاملة. إن اختلفا: ابحث في أول خطوة كتبها الطالب وقارنها بأول خطوة في الجواب النموذجي — هل أجرى نفس العملية على نفس الأرقام؟ حدد أول نقطة اختلاف واحكم منها. لا تحل أي معادلة بنفسك. الملاحظات بالعربية الفصحى."
-          : "أنت مقيّم امتحانات. اقرأ جواب الطالب النهائي وقارنه بالجواب النموذجي. إن تطابقا درجة كاملة. إن اختلفا حدد الفرق وامنح الدرجة المناسبة. الملاحظات بالعربية الفصحى."
+          ? "أنت مقيّم امتحانات رياضيات. القاعدة الأهم: لا تعيد حساب أي شيء كتبه الطالب. إذا كتب 3×4=10 فجوابه هو 10. إذا كتب 15÷3=6 فجوابه هو 6. STUDENT_FINAL هو الرقم بعد آخر = في خط الطالب — اقرأه كنقش حبر فقط. قارنه بـ MODEL_FINAL. إن اختلفا ابحث في الخطوات عن أول نقطة اختلاف. الملاحظات بالعربية الفصحى."
+          : "أنت مقيّم امتحانات. اقرأ جواب الطالب النهائي كما هو مكتوب ولا تعيد حسابه. قارنه بالجواب النموذجي وامنح الدرجة المناسبة. الملاحظات بالعربية الفصحى."
       }
     });
 
@@ -353,25 +349,31 @@ OUTPUT — JSON only:
     // ─────────────────────────────────────────────────────────────────────
     const questionLabels = flattenedQuestions.map(q => ({ id: q.id, label: q.label }));
 
-    const transcribePrompt = `You are a document scanner. Scan this exam paper and copy handwritten text exactly.
+    const transcribePrompt = `You are a DUMB optical scanner with zero math knowledge. You convert ink to text.
 
 For each question label listed here: ${JSON.stringify(questionLabels)}
-Find the student's handwritten response area for that question and copy EVERY character — digit by digit, symbol by symbol, line by line.
+Find the handwritten answer area for that question and copy EVERY ink mark exactly.
 
-RULES — NO EXCEPTIONS:
-- You are a SCANNER. Copy ink shapes exactly. Do not interpret meaning.
-- Copy every number, sign (+−×÷√=), and step you see in the answer area.
-- [BOXED: value] — if student boxed or circled a value, mark it this way.
-- Crossed-out text: skip.
-- Blank area: write "BLANK".
-- Unclear: copy what you see + "?".
+ABSOLUTE RULES — VIOLATION = SYSTEM FAILURE:
+1. YOU HAVE NO MATH KNOWLEDGE. You cannot add, subtract, multiply, divide, or evaluate anything.
+2. Copy EVERY character exactly as written: digits, operators (+−×÷√=<>), Arabic/Western numerals.
+3. If student wrote "3×4=10" → you write "3×4=10". You do NOT write "3×4=12". EVER.
+4. If student wrote "5+3=7" → you write "5+3=7". You do NOT write "5+3=8". EVER.
+5. The = sign and what follows it is PART OF THE ANSWER. Never replace the value after = with a computed result.
+6. [BOXED: value] — student circled or boxed a final answer.
+7. Crossed-out text: skip it.
+8. Blank area: write "BLANK".
+9. Unclear ink: copy best guess + "?".
+10. Multi-line working: copy ALL lines in order, separated by " | ".
+
+CRITICAL: You are copying INK SHAPES. 3×4=10 has three ink shapes after = : "1" and "0". Copy "10". Not "12".
 
 Output JSON only:
 {"studentName": "...", "transcriptions": [{"id": "...", "rawText": "..."}]}
 
-- studentName: the student's name if written on the paper, otherwise "طالب".
-- id: must match exactly the id from the question labels list.
-- rawText: everything written in the answer area for that question, copied character by character.`;
+- studentName: student's name from paper, otherwise "طالب".
+- id: must match exactly from question labels list.
+- rawText: every ink mark in the answer area, copied character by character, exactly as written.`;
 
     const transcribeResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -379,7 +381,7 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "You are a document scanner. You convert handwritten images to raw text with zero interpretation. You have no knowledge of math or any subject. You only see ink marks and copy them exactly as they appear. You never alter, fix, or interpret what you see."
+        systemInstruction: "You are a zero-intelligence optical character recognition scanner. You have NO knowledge of mathematics, arithmetic, language, or meaning. You see only ink shapes and you copy them. If you see the ink shapes '3×4=10' you output '3×4=10'. You never compute. You never verify. You never correct. The digit after = is just an ink shape to copy, not a result to validate. Copy every ink shape exactly as it appears."
       }
     });
 
@@ -406,32 +408,49 @@ ${JSON.stringify(questionsWithRaw)}
 Total Max Grade: ${totalExamGrade}.
 Required Questions Count: ${requiredQuestionsCount || 'All'}.
 
+IMPORTANT — THE TRANSCRIBED TEXT IS GROUND TRUTH:
+The studentRawText was copied ink-by-ink from the student's paper. It is EXACTLY what the student wrote.
+If studentRawText says "3×4=10" then the student wrote 3×4=10. The student's answer IS 10.
+Do NOT recompute. Do NOT verify arithmetic in studentRawText. Treat it as a fixed string.
+
 For each question:
 
-STEP 1 — Extract student's FINAL value from studentRawText:
-  Final value = last number in the text, OR [BOXED: value] if present.
-  Do NOT compute anything. Just read the last value written.
-  Store as STUDENT_FINAL.
+STEP 1 — IDENTIFY STUDENT'S FINAL WRITTEN VALUE:
+  Look for a [BOXED: value] in studentRawText → that is STUDENT_FINAL.
+  If no box: STUDENT_FINAL = the value written after the LAST "=" sign in studentRawText.
+  If no "=" sign: STUDENT_FINAL = the entire studentRawText trimmed.
+  If studentRawText is "BLANK" → grade 0, feedback "لم يجب", done.
+  DO NOT COMPUTE. STUDENT_FINAL is read from the text string, not calculated.
 
-STEP 2 — Compare STUDENT_FINAL with the 'answer' field (final value only):
-  ✅ Values match → full grade. studentAnswer = STUDENT_FINAL. Done.
-  ❌ Values differ → Step 3.
+STEP 2 — IDENTIFY MODEL'S FINAL VALUE:
+  MODEL_FINAL = the value after the last "=" in the 'answer' field.
+  If no "=": MODEL_FINAL = the full 'answer' field trimmed.
+  DO NOT COMPUTE. Just read the string.
 
-STEP 3 — Locate error in studentRawText (only if Step 2 failed):
-${isMath ? `  Compare the student's written steps against the model answer steps:
-  ① Operation order: did student do + or − before × or ÷? → ORDER_OF_OPERATIONS error → grade 0.
-  ② Signs: wrong + − × ÷ √ compared to model answer? → SIGN_ERROR → partial grade.
-  ③ Arithmetic: a step result differs from model answer same step? → ARITHMETIC_SLIP → deduct 1 mark max.
-  ④ Wrong method/formula? → WRONG_METHOD → grade based on validity.
-  ⑤ Incomplete? → partial for completed correct steps.`
+STEP 3 — COMPARE AS STRINGS (allow Arabic/Western digit equivalence):
+  Normalize: convert Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) to Western (0-9) for comparison only.
+  Are STUDENT_FINAL and MODEL_FINAL numerically equal?
+  ✅ YES → full grade. studentAnswer = STUDENT_FINAL. Done.
+  ❌ NO  → go to Step 4.
+
+STEP 4 — LOCATE DIVERGENCE (only if Step 3 failed):
+${isMath ? `  Compare studentRawText steps against 'answer' steps to find FIRST divergence point.
+  ① ORDER_OF_OPERATIONS: student applied lower-priority op before higher-priority? → grade 0.
+  ② SIGN_ERROR: wrong operator (+−×÷√) at correct position? → partial grade (50%).
+  ③ ARITHMETIC_SLIP: correct operator, wrong computed result at one step? → deduct 1 mark max.
+  ④ WRONG_METHOD: completely different approach? → 0 or based on validity.
+  ⑤ INCOMPLETE: stopped mid-way? → partial for correct steps done.`
     : `  Compare meaning of studentRawText with expected answer. Partial credit proportionally.`}
 
 Output JSON only:
 {"results":[{"studentName":"${studentName}","gradings":[{"questionId":"...","studentAnswer":"...","grade":number,"maxGrade":number,"feedback":"...","box":[0,0,0,0],"pageIndex":0}]}]}
 
-- studentAnswer: STUDENT_FINAL if Step 2 passed, or full studentRawText if Step 3.
-- grade: full (Step 2) or 0/partial (Step 3).
-- feedback: Arabic (العربية الفصحى). Step 2 pass → brief praise. Step 3 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. الخطأ: [وصف دقيق لنقطة الانحراف]."`;
+- studentAnswer: STUDENT_FINAL (Step 2 pass) or full studentRawText (Step 4 reached).
+- grade: full (Step 3 pass) or 0/partial (Step 4).
+- feedback: Arabic (العربية الفصحى).
+  Step 3 pass → brief praise.
+  Step 4 → "الطالب كتب [STUDENT_FINAL] والجواب النموذجي [MODEL_FINAL]. الخطأ: [وصف دقيق لنقطة الانحراف]."
+- box/pageIndex: set to 0.`;`;
 
     const compareResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -440,8 +459,8 @@ Output JSON only:
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مقارن نصوص صارم. تستقبل نصاً منسوخاً من ورقة الطالب وتقارنه بالجواب النموذجي. لا تحل أي معادلة. استخرج الرقم النهائي من النص المنسوخ وقارنه بالجواب النموذجي. إن اختلفا ابحث في النص عن أول نقطة اختلاف عن الجواب النموذجي. الملاحظات بالعربية الفصحى."
-          : "أنت مقارن نصوص. قارن النص المنسوخ بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
+          ? "أنت مقارن نصوص صارم للرياضيات. تستقبل نصاً منسوخاً حرفياً من ورقة الطالب. هذا النص هو الحقيقة المطلقة — لا تعيد حساب أي شيء فيه. إذا كتب 3×4=10 فجوابه هو 10 وليس 12. استخرج الرقم بعد آخر علامة = في النص المنسوخ كـ STUDENT_FINAL. استخرج الرقم بعد آخر = في حقل answer كـ MODEL_FINAL. قارنهما كنصين. إن تطابقا درجة كاملة. إن اختلفا ابحث في خطوات النص عن أول نقطة اختلاف. الملاحظات بالعربية الفصحى."
+          : "أنت مقارن نصوص. النص المنسوخ هو ما كتبه الطالب فعلاً — لا تعيد حسابه. قارن معناه بالجواب المتوقع وأعط الدرجة. الملاحظات بالعربية الفصحى."
       }
     });
 
