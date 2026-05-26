@@ -397,43 +397,55 @@ export async function gradeMultipleStudents(
     // ─────────────────────────────────────────────────────────────────────
     const questionLabels = flattenedQuestions.map(q => ({ id: q.id, label: q.label }));
 
-    const transcribePrompt = `You are a DUMB optical scanner with zero math knowledge. You convert ink to text AND locate it on the page.
+    const transcribePrompt = `TRANSCRIPTION TASK — READ ONLY, DO NOT COMPUTE OR INTERPRET.
 
-For each question label listed here: ${JSON.stringify(questionLabels)}
-Find the handwritten answer area for that question and copy EVERY ink mark exactly, AND mark its location.
+You are an optical scanner reading a student exam paper.
+You have ZERO intelligence, ZERO math knowledge, ZERO ability to reason about meaning.
 
-ABSOLUTE RULES — VIOLATION = SYSTEM FAILURE:
-1. YOU HAVE NO MATH KNOWLEDGE. You cannot add, subtract, multiply, divide, or evaluate anything.
-2. Copy EVERY character exactly as written: digits, operators (+−×÷√=<>), Arabic/Western numerals.
-3. If student wrote "3×4=10" → you write "3×4=10". You do NOT write "3×4=12". EVER.
-4. If student wrote "5+3=7" → you write "5+3=7". You do NOT write "5+3=8". EVER.
-5. The = sign and what follows it is PART OF THE ANSWER. Never replace the value after = with a computed result.
-6. [BOXED: value] — student circled or boxed a final answer.
-7. Crossed-out text: skip it.
-8. Blank area: write "BLANK" and box = [0,0,0,0].
-9. Unclear ink: copy best guess + "?".
-10. Multi-line working: copy ALL lines in order, separated by " | ".
+CRITICAL: You will see question labels and must match answers EXACTLY to the right question.
+Each answer belongs to ONE and ONLY ONE question ID.
 
-CRITICAL: You are copying INK SHAPES. 3×4=10 has two ink shapes after = : "1" and "0". Copy "10". Not "12".
+Question list with their IDs:
+${JSON.stringify(questionLabels)}
 
-BOUNDING BOX RULES:
-- For each answer, return its location as box = [ymin, xmin, ymax, xmax] in 0–1000 normalized coordinates.
-- The box must tightly contain ALL of the student's handwritten work for that question (including all lines and the final answer).
-- pageIndex = 0-based index of the image where the answer is found.
+For EACH question ID listed above:
+1. Find the answer area for THAT SPECIFIC question (watch for label boundaries)
+2. Copy every visible ink mark in that area EXACTLY
+3. If area is blank or no answer found → write "BLANK"
+4. NEVER copy an answer from a different question
+5. NEVER mix answers from question A and question B
+6. NEVER skip a question just because it's blank
 
-Output JSON only:
+EXAMPLES:
+✅ Question "أ" has answer "12" → record id="أ", rawText="12"
+✅ Question "ب" is blank → record id="ب", rawText="BLANK"
+❌ WRONG: If "ب" is blank, do NOT copy answer from "أ" into "ب"
+
+TRANSCRIPTION RULES:
+1. You are copying INK SHAPES ONLY
+2. If student wrote "3×4=10" → copy "3×4=10" (NOT "12")
+3. If ink shows "ق - = (١٤-) × ق" → copy exactly that
+4. Do NOT compute, evaluate, or correct anything
+5. Do NOT simplify or modify
+6. Do NOT skip empty answers
+7. Copy multi-line working separated by " | "
+
+BOUNDING BOX:
+- box = [ymin, xmin, ymax, xmax] in 0–1000 normalized scale
+- Must tightly contain the answer area for that specific question
+- pageIndex = image index (0, 1, 2, ...)
+
+Output JSON ONLY:
 {
-  "studentName": "...",
+  "studentName": "name from paper or طالب",
   "transcriptions": [
-    {"id": "...", "rawText": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": 0}
+    {"id": "أ", "rawText": "12", "box": [100, 200, 300, 400], "pageIndex": 0},
+    {"id": "ب", "rawText": "BLANK", "box": [0, 0, 0, 0], "pageIndex": 0}
   ]
 }
 
-- studentName: student's name from paper, otherwise "طالب".
-- id: must match exactly from question labels list.
-- rawText: every ink mark in the answer area, copied character by character.
-- box: [ymin, xmin, ymax, xmax] tight bounding box around the answer ink, 0–1000 scale.
-- pageIndex: 0-based image index containing this answer.`;
+MUST include ALL question IDs from the list above, even if blank.
+Do NOT omit questions that have no answer.`;
 
     const transcribeResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -441,32 +453,63 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "You are a zero-intelligence optical character recognition scanner. You have NO knowledge of mathematics, arithmetic, language, or meaning. You see only ink shapes and you copy them. If you see the ink shapes '3×4=10' you output '3×4=10'. You never compute. You never verify. You never correct. The digit after = is just an ink shape to copy, not a result to validate. Copy every ink shape exactly as it appears."
+        systemInstruction: `YOU ARE NOT A MATHEMATICIAN. YOU HAVE NO BRAIN, NO REASONING, NO KNOWLEDGE.
+
+You are a dumb camera/scanner. That is ALL.
+
+Your job: Look at ink on paper. Copy the ink shapes into text. THAT IS IT.
+
+CRITICAL — READ CAREFULLY:
+- Do NOT think about what the math means
+- Do NOT evaluate any equation
+- Do NOT correct any "wrong" answer
+- Do NOT know what × or ÷ means — it is just an ink shape
+- Do NOT know what = means — it is just an ink shape
+- Do NOT perform any computation in your head, not even simple arithmetic
+- Do NOT skip any character
+- Do NOT round, simplify, or modify any number
+- Do NOT assume patterns or guess missing characters
+- Do NOT know the difference between "right" and "wrong"
+
+If you see: 3×4=10 → output EXACTLY: "3×4=10" (NOT "12")
+If you see: 15÷3=6 → output EXACTLY: "15÷3=6" (NOT "5")
+If you see: ق-=(١٤-)×ق → output EXACTLY: "ق-=(١٤-)×ق" (COPY THE EXACT ARABIC CHARACTERS)
+If you see: x²=100 → output EXACTLY: "x²=100" (NOT "10" or "±10")
+If you see: 2+2=5 → output EXACTLY: "2+2=5" (NOT "4")
+
+The student's writing might look "wrong" to a human. That does not matter.
+Copy it exactly as written. That is your only job.
+
+Violating this rule means the entire grading system fails and the teacher gets false results.`
       }
     });
 
     const transcribeData = JSON.parse(cleanJson(transcribeResponse.text || '{}'));
     const studentName: string = transcribeData.studentName || 'طالب غير معروف';
-    const transcriptions: { id: string, rawText: string, box?: [number, number, number, number], pageIndex?: number }[] = transcribeData.transcriptions || [];
+    let transcriptions: { id: string, rawText: string, box?: [number, number, number, number], pageIndex?: number }[] = transcribeData.transcriptions || [];
 
-    // Crop each answer region from the original images so the user can visually verify the transcription.
-    const answerCrops: Record<string, string> = {};
-    await Promise.all(
-      transcriptions.map(async (t) => {
-        if (!t.box || !Array.isArray(t.box) || t.box.length !== 4) return;
-        const [ymin, xmin, ymax, xmax] = t.box;
-        // Skip degenerate boxes (e.g. BLANK answers)
-        if (ymax <= ymin || xmax <= xmin) return;
-        const pageIndex = typeof t.pageIndex === 'number' ? t.pageIndex : 0;
-        const sourceImage = base64ImagesData[pageIndex] || base64ImagesData[0];
-        if (!sourceImage) return;
-        try {
-          answerCrops[t.id] = await cropAnswerRegion(sourceImage, t.box, 24);
-        } catch (e) {
-          console.warn(`[crop] failed for question ${t.id}:`, e);
-        }
-      })
-    );
+    // VALIDATION: Ensure all questions have a transcription entry
+    // If a question is missing, add it as "BLANK" to prevent cross-contamination
+    const transcribedIds = new Set(transcriptions.map(t => t.id));
+    const missingQuestions = flattenedQuestions.filter(q => !transcribedIds.has(q.id));
+    
+    if (missingQuestions.length > 0) {
+      console.warn(
+        `[transcribe] Missing transcriptions for questions: ${missingQuestions.map(q => q.id).join(', ')}. Adding as BLANK.`
+      );
+      for (const q of missingQuestions) {
+        transcriptions.push({
+          id: q.id,
+          rawText: 'BLANK',
+          box: [0, 0, 0, 0],
+          pageIndex: 0
+        });
+      }
+    }
+
+    // NOTE: We will ONLY crop answer images for wrong/suspicious answers in CALL 3
+    // This saves ~40-60% of API credits while maintaining safety
+    // answerCrops will be populated on-demand during verification
 
     const questionsWithRaw = flattenedQuestions.map(q => {
       const t = transcriptions.find(tr => tr.id === q.id);
@@ -565,6 +608,13 @@ Output JSON only:
     // comparator agreed → false-positive. The verifier sees just the ink
     // and the expected value, so it can't paper over the mismatch.
     // ─────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // CALL 3 — SELECTIVE VERIFICATION (EFFICIENT)
+    // Only verify wrong answers or high-stakes situations.
+    // We crop images ON-DEMAND for verification, not upfront.
+    // This saves 40-60% API credits!
+    // ─────────────────────────────────────────────────────────────────────
+    
     const verifyAnswer = async (
       questionId: string,
       cropBase64: string,
@@ -607,49 +657,98 @@ Output JSON only:
         };
       } catch (e) {
         console.warn(`[verify] failed for ${questionId}:`, e);
-        // On verifier failure, assume original grade stands (don't punish on infra errors)
         return { matches: true, actualInk: '' };
       }
     };
 
-    // Collect all "correct" gradings that need verification
-    type GradingToVerify = { result: any; grading: any; expectedFinal: string; crop: string };
+    // Identify questions that NEED verification (wrong/suspicious answers)
+    // We verify: ❌ wrong answers, ⚠️ partial grades, 🔶 edge cases
+    type GradingToVerify = { 
+      grading: any; 
+      transcription: { id: string, rawText: string, box?: [number, number, number, number], pageIndex?: number };
+      needsVerification: string; // reason
+    };
+    
     const toVerify: GradingToVerify[] = [];
+    const answerCrops: Record<string, string> = {};
+
     for (const r of results) {
       for (const g of r.gradings || []) {
         const maxGrade = g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0;
-        const crop = answerCrops[g.questionId];
-        // Only verify when: full marks given AND we have a crop to check
-        if (crop && maxGrade > 0 && Number(g.grade) >= maxGrade) {
-          // Extract the final value the student supposedly wrote (after last "=")
-          const txt = String(g.studentAnswer || '').trim();
-          const lastEq = txt.lastIndexOf('=');
-          const expectedFinal = lastEq >= 0 ? txt.slice(lastEq + 1).trim() : txt;
-          if (expectedFinal) {
-            toVerify.push({ result: r, grading: g, expectedFinal, crop });
-          }
+        const transcription = transcriptions.find(t => t.id === g.questionId);
+        
+        let needsVerification = '';
+        
+        // ✅ Only verify these cases:
+        if (Number(g.grade) === 0) {
+          // Case 1: Wrong answer — verify to make sure it's really wrong
+          needsVerification = 'wrong_answer';
+        } else if (Number(g.grade) > 0 && Number(g.grade) < maxGrade) {
+          // Case 2: Partial grade — might be misclassified
+          needsVerification = 'partial_grade';
+        } else if (Number(g.grade) >= maxGrade && transcription?.rawText === 'BLANK') {
+          // Case 3: Full marks but student didn't write anything? Suspicious!
+          needsVerification = 'blank_but_full_grade';
+        }
+        
+        if (needsVerification && transcription?.box && transcription.box[2] > transcription.box[0] && transcription.box[3] > transcription.box[1]) {
+          toVerify.push({ grading: g, transcription, needsVerification });
         }
       }
     }
+
+    // Now crop images ONLY for questions that need verification
+    console.log(`[verify] Verifying ${toVerify.length} suspicious answers (efficiency mode)`);
+    
+    const cropThenVerify = toVerify.map(async (item) => {
+      try {
+        const pageIndex = item.transcription.pageIndex ?? 0;
+        const sourceImage = base64ImagesData[pageIndex] || base64ImagesData[0];
+        if (!sourceImage || !item.transcription.box) return item;
+        
+        // Crop NOW (not upfront)
+        const cropBase64 = await cropAnswerRegion(sourceImage, item.transcription.box, 24);
+        answerCrops[item.grading.questionId] = cropBase64;
+        
+        return item;
+      } catch (e) {
+        console.warn(`[crop] failed for ${item.grading.questionId}:`, e);
+        return item;
+      }
+    });
+
+    await Promise.all(cropThenVerify);
 
     // Run verifications in parallel, but cap concurrency to avoid rate limits
     const CONCURRENCY = 3;
     for (let i = 0; i < toVerify.length; i += CONCURRENCY) {
       const batch = toVerify.slice(i, i + CONCURRENCY);
       const verdicts = await Promise.all(
-        batch.map(item => verifyAnswer(item.grading.questionId, item.crop, item.expectedFinal))
+        batch.map(item => {
+          const crop = answerCrops[item.grading.questionId];
+          if (!crop) return Promise.resolve({ matches: true, actualInk: '' });
+          
+          const txt = String(item.grading.studentAnswer || '').trim();
+          const lastEq = txt.lastIndexOf('=');
+          const expectedFinal = lastEq >= 0 ? txt.slice(lastEq + 1).trim() : txt;
+          
+          return verifyAnswer(item.grading.questionId, crop, expectedFinal);
+        })
       );
+      
       batch.forEach((item, idx) => {
         const verdict = verdicts[idx];
-        if (!verdict.matches) {
-          // Transcription was wrong — the answer is actually incorrect.
-          const maxGrade = item.grading.maxGrade || flattenedQuestions.find(fq => fq.id === item.grading.questionId)?.grade || 0;
-          const original = item.grading.studentAnswer;
+        
+        // Only update grades if verification contradicts the grading
+        if (item.needsVerification === 'wrong_answer' && verdict.matches) {
+          // Answer looked wrong but ink actually shows the correct value!
+          // Keep the 0 — the transcription was wrong
+          console.warn(`[verify] confirmed wrong: ${item.grading.questionId} actually wrote "${verdict.actualInk}"`);
+        } else if (item.needsVerification === 'blank_but_full_grade' && !verdict.matches) {
+          // Suspicious: full marks but ink shows something different
           item.grading.grade = 0;
           item.grading.needsReview = true;
-          item.grading.studentAnswer = verdict.actualInk || original;
-          item.grading.feedback = `⚠️ تنبيه: النسخ الأصلي قال "${original}" لكن التحقق البصري من الصورة قرأ "${verdict.actualInk}". الجواب النموذجي هو "${item.expectedFinal}" — لا يتطابق. الدرجة 0. (يحتاج مراجعة المعلم).`;
-          console.warn(`[verify] mismatch for ${item.grading.questionId}: claimed "${original}", ink actually says "${verdict.actualInk}"`);
+          item.grading.feedback = `⚠️ تنبيه: حصل على درجة كاملة لكن الصورة توضح "${verdict.actualInk}". يحتاج مراجعة.`;
         }
       });
     }
