@@ -219,7 +219,10 @@ export async function gradeStudentPaper(
 
     if (onProgress) onProgress(0, 100, 'grading');
 
-    const isMath = subject.includes('رياضيات') || subject.toLowerCase().includes('math');
+    // Apply strict numeric rules for any subject that could have arithmetic
+    // (math, physics, chemistry, or any subject not explicitly text-only)
+    const textOnlySubjects = ['أحياء', 'قواعد', 'إسلامية', 'إنجليزي'];
+    const isMath = !textOnlySubjects.some(s => subject.includes(s));
 
     // ══════════════════════════════════════════════════════════════════════
     // SINGLE CALL — direct from images
@@ -239,81 +242,50 @@ export async function gradeStudentPaper(
       maxGrade: q.grade
     }));
 
-    const mathPrompt = `You are looking at a student exam paper. You have the question list and model answers below.
+    const prompt = `You are reviewing a student exam paper.
 
-Questions:
+Questions and model answers:
 ${JSON.stringify(questionsForPrompt)}
 
-For EVERY question, follow this EXACT 4-step process and record each step:
+For EVERY question, do these steps IN ORDER:
 
-STEP 1 — READ (copy from paper):
-  Look at the student's handwritten answer for this question.
-  Copy every character you see EXACTLY as it appears — digits, signs, operators, variables.
-  This is your "seen" value. Do NOT change any digit or sign.
-  Write this into "studentAnswer".
+STEP 1 — COPY FROM PAPER (no thinking, no math):
+  Find the student answer area for this question in the images.
+  Copy every character exactly as it appears on the paper — digits, signs, operators.
+  Put this in "studentAnswer". Do NOT change any character.
 
-STEP 2 — EXTRACT OPERANDS (for math expressions only):
-  If the student wrote an arithmetic expression like "A op B = R":
-  - Extract the left side operands: A and B (and the operator op)
-  - Extract the result R that the student wrote (from STEP 1, unchanged)
-  Example: student wrote "3 × 2 = 5" → left="3 × 2", studentResult="5"
-  Example: student wrote "85 ÷ 5 = 18" → left="85 ÷ 5", studentResult="18"
+STEP 2 — FOR ANY NUMERIC EXPRESSION (A op B = R):
+  Take the operands A and B and the operator that you copied in STEP 1.
+  Compute the correct result YOURSELF from those operands only.
+  Store it as "derivedResult".
+  Examples:
+    you copied "3 × 2 = 5"   → compute 3×2 yourself → derivedResult = 6
+    you copied "85 ÷ 5 = 18" → compute 85÷5 yourself → derivedResult = 17
+    you copied "3 × -5 = -13"→ compute 3×-5 yourself → derivedResult = -15
+    you copied "10 - 7 = 4"  → compute 10-7 yourself → derivedResult = 3
+  Note: × and ÷ are done before + and −.
+  If no numeric expression → derivedResult = null.
 
-STEP 3 — DERIVE (compute yourself):
-  Using ONLY the operands from STEP 2, compute the mathematically correct result yourself.
-  Do NOT look at what the student wrote. Do NOT look at the model answer.
-  Just apply the operator to the operands.
-  Example: "3 × 2" → you compute: 3 times 2 = 6. Store as "derivedResult": 6
-  Example: "85 ÷ 5" → you compute: 85 divided by 5 = 17. Store as "derivedResult": 17
-  Example: "3 × -5" → you compute: 3 times -5 = -15. Store as "derivedResult": -15
+STEP 3 — JUDGE:
+  For numeric answers: compare what you copied (studentAnswer) against derivedResult.
+    If they differ → WRONG → grade = 0 for that expression.
+    "5" vs derivedResult 6 → wrong. "-13" vs derivedResult -15 → wrong.
+  Then compare studentAnswer against modelAnswer.
+    If numeric: must match exactly (same digits, same sign).
+    If text: must contain essential facts/keywords.
+  Assign grade accordingly.
 
-STEP 4 — COMPARE AND JUDGE:
-  a) Compare studentResult (from STEP 1) with derivedResult (from STEP 3):
-     - If they match → the student's arithmetic on this line is correct
-     - If they differ → the student's arithmetic on this line is WRONG
-     Example: studentResult="5", derivedResult=6 → WRONG (5 ≠ 6)
-     Example: studentResult="-13", derivedResult=-15 → WRONG (-13 ≠ -15)
-  b) Compare the student's final answer (STEP 1) with the modelAnswer:
-     - Must match exactly in value and sign
-  c) Assign grade: full marks only if both comparisons pass. Zero if arithmetic is wrong.
-
-ORDER OF OPERATIONS rule: × and ÷ are always done before + and −.
-
-Output JSON:
+Output JSON only:
 {
   "studentName": "name from paper or طالب",
   "gradings": [
     {
       "questionId": "id",
-      "studentAnswer": "<EXACT text from STEP 1 — never changed>",
-      "derivedResult": "<your computed result from STEP 3, or null if not math>",
+      "studentAnswer": "<exact copy from STEP 1, never changed>",
+      "derivedResult": "<your computed result or null>",
       "grade": <number>,
       "maxGrade": <number>,
-      "feedback": "<Arabic: state what the student wrote, what the correct result is, and why it is wrong or right>",
-      "box": [ymin, xmin, ymax, xmax],
-      "pageIndex": <0-based image index>
-    }
-  ]
-}`;
-
-    const nonMathPrompt = `You are reviewing a student exam paper. Questions and model answers:
-${JSON.stringify(questionsForPrompt)}
-
-For each question:
-1. Find the student's answer in the images and copy it EXACTLY as written into "studentAnswer".
-2. Compare it to the modelAnswer — check for essential facts and keywords.
-3. Assign a grade. Full marks if meaning matches. Partial if some points present. Zero if blank or wrong.
-
-Output JSON:
-{
-  "studentName": "name from paper or طالب",
-  "gradings": [
-    {
-      "questionId": "id",
-      "studentAnswer": "<exact text from paper>",
-      "grade": <number>,
-      "maxGrade": <number>,
-      "feedback": "<brief Arabic feedback>",
+      "feedback": "<Arabic: mention what student wrote, what correct result is>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based image index>
     }
@@ -321,7 +293,7 @@ Output JSON:
 }`;
 
     const parts: any[] = base64ImagesData.map(data => ({ inlineData: { data, mimeType: "image/jpeg" } }));
-    parts.push({ text: isMath ? mathPrompt : nonMathPrompt });
+    parts.push({ text: prompt });
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -329,9 +301,7 @@ Output JSON:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: isMath
-          ? "أنت ناظر امتحان يفحص ورقة الطالب. عملك في أربع خطوات منفصلة لكل سؤال: أولاً انسخ ما تراه بالضبط كما هو مكتوب. ثانياً استخرج الأرقام والعملية من النص الذي نسخته. ثالثاً احسب أنت ناتج العملية من الأرقام فقط دون النظر لما كتبه الطالب. رابعاً قارن ناتجك أنت بما نسخته من الطالب — إن اختلفا فالطالب أخطأ. لا تعدل أبداً ما كتبه الطالب في حقل studentAnswer. الملاحظات بالعربية الفصحى."
-          : "أنت ناظر امتحان يفحص ورقة الطالب. انسخ إجابة الطالب بالضبط كما كتبها ثم قارنها بالنموذج وامنح الدرجة. لا تعدل نص إجابة الطالب. الملاحظات بالعربية الفصحى."
+        systemInstruction: "أنت ناظر امتحان. لكل سؤال: أولاً انسخ ما كتبه الطالب بالضبط كما هو في الورقة بدون أي تغيير. ثانياً إذا وجدت تعبيراً حسابياً مثل A عملية B = R، احسب أنت ناتج العملية من A وB فقط ولا تنظر لما كتبه الطالب، ثم قارن ناتجك بما نسخته — إن اختلفا فالإجابة خاطئة. ثالثاً قارن ما نسخته بالإجابة النموذجية. لا تغير أبداً ما كتبه الطالب في حقل studentAnswer. الملاحظات بالعربية."
       }
     });
 
