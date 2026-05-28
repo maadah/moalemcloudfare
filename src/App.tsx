@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
-import { Question, gradeStudentPaper, gradeMultipleStudents, extractExamFromImages, extractExamFromDualImages } from './services/geminiService';
+import { Question, gradeStudentPaper, extractExamFromImages, extractExamFromDualImages } from './services/geminiService';
 import jsPDF from 'jspdf';
 
 const ARABIC_BRANCH_LETTERS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ي'];
@@ -468,17 +468,6 @@ function GradingResultItem({ question, gradings, onGradeChange, level = 1 }: any
 
       {!hasSub && grading && (
         <div className="mt-4 space-y-4">
-          {/* Warning banner for verification mismatch */}
-          {grading.needsReview && (
-            <div className="p-4 bg-orange-50 border-2 border-orange-400 rounded-2xl flex items-start gap-3">
-              <div className="text-orange-600 text-2xl">⚠️</div>
-              <div className="flex-1">
-                <p className="font-bold text-orange-800 text-sm">تنبيه: التحقق البصري اكتشف عدم تطابق</p>
-                <p className="text-orange-700 text-xs mt-1">يحتاج مراجعة المعلم — الإجابة المنسوخة لا تطابق ما في الصورة</p>
-              </div>
-            </div>
-          )}
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
             <div className="space-y-2">
               <span className="text-stone-400 font-bold flex items-center gap-1 uppercase tracking-wider text-[10px]">
@@ -490,32 +479,6 @@ function GradingResultItem({ question, gradings, onGradeChange, level = 1 }: any
               >
                 "{grading.studentAnswer}"
               </p>
-              
-              {/* Show cropped image of student's handwriting */}
-              {grading.studentAnswerImage && (
-                <div className="mt-3">
-                  <p className="text-[10px] text-stone-400 font-bold mb-2">صورة من خط الطالب:</p>
-                  <img 
-                    src={`data:image/jpeg;base64,${grading.studentAnswerImage}`}
-                    alt="صورة جواب الطالب من ورقة الامتحان"
-                    className={cn(
-                      "w-full max-w-xs h-auto rounded-xl border-2 cursor-pointer hover:scale-105 transition-transform",
-                      grading.needsReview ? "border-orange-400" : "border-emerald-400"
-                    )}
-                    onClick={(e) => {
-                      const img = e.currentTarget;
-                      if (img.style.maxWidth === 'none') {
-                        img.style.maxWidth = '24rem';
-                        img.style.cursor = 'zoom-in';
-                      } else {
-                        img.style.maxWidth = 'none';
-                        img.style.cursor = 'zoom-out';
-                      }
-                    }}
-                  />
-                  <p className="text-[9px] text-stone-400 mt-1">💡 تحقق بصرياً: هل النص المنسوخ يطابق ما كتبه الطالب؟</p>
-                </div>
-              )}
             </div>
             <div className="space-y-2">
               <span className="text-stone-400 font-bold flex items-center gap-1 uppercase tracking-wider text-[10px]">
@@ -3074,7 +3037,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
     setIsGrading(true);
     setProgress({ current: 0, total: images.length, phase: 'compressing' });
     try {
-      const { results } = await gradeMultipleStudents(
+      const { results } = await gradeStudentPaper(
         previews, 
         exam.questions, 
         exam.totalGrade, 
