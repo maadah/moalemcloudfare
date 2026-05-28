@@ -196,7 +196,7 @@ export async function gradeStudentPaper(
 
     const base64ImagesData: string[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
-      const compressed = await compressImage(imageUrls[i], 2000, 2000, 0.85);
+      const compressed = await compressImage(imageUrls[i], 1600, 1600, 0.75);
       base64ImagesData.push(compressed);
       if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
     }
@@ -267,6 +267,40 @@ Output JSON only:
   ]
 }`;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Run CALL 1 (transcription) and CALL 2 (judgment) in PARALLEL
+    // Call 1: images only, no model answers → pure digit conversion
+    // Call 2: uses a temporary "blank" transcription as placeholder;
+    //         its real job is to judge once we merge results below.
+    // Actually: Call 2 needs Call 1 results, so we run Call 1 first,
+    // but we make Call 1 as lightweight as possible (no judgment needed).
+    // Both calls use the same fast flash model.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Build judge prompt builder so we can call it after transcription
+    const buildJudgePrompt = (items: any[]) => isMath
+      ? `You are a mathematics examiner. Student answers are in Western digits. No images.
+
+Items:
+${JSON.stringify(items)}
+
+For each item:
+A) Copy studentTranscription into "studentAnswer" unchanged.
+B) For each arithmetic line containing "=", split on "|" or newlines:
+   - Compute the LEFT side of "=" yourself from scratch.
+   - Compare to what student wrote on the RIGHT of "=".
+   - If different → line is WRONG.
+   Check: wrong result, wrong sign, order of operations (× ÷ before + −), carried-forward errors.
+   lineChecks: [{"line":"...","leftComputed":<n>,"studentWrote":<n>,"ok":true/false}]
+C) Any lineCheck ok=false → grade=0. All ok + matches modelAnswer → full grade.
+
+Output JSON:
+{"gradings":[{"questionId":"id","studentAnswer":"<unchanged>","lineChecks":[...],"grade":<n>,"maxGrade":<n>,"feedback":"<Arabic>"}]}`
+      : `Examiner. No images. Compare studentTranscription to modelAnswer for facts/keywords.
+Items: ${JSON.stringify(items)}
+Output JSON: {"gradings":[{"questionId":"id","studentAnswer":"<studentTranscription unchanged>","grade":<n>,"maxGrade":<n>,"feedback":"<Arabic>"}]}`;
+
+    // ── CALL 1: Transcription (images, no model answers) ──────────────────
     const transcribeParts: any[] = base64ImagesData.map(d => ({ inlineData: { data: d, mimeType: "image/jpeg" } }));
     transcribeParts.push({ text: transcribePrompt });
 
@@ -276,7 +310,7 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "أنت روبوت نسخ فقط. مهمتك الوحيدة: انسخ الأرقام والرموز التي تراها على الورقة وحوّل الأرقام العربية الهندية إلى أرقام غربية باستخدام الجدول. لا تحسب شيئاً. لا تعرف الإجابات الصحيحة ولا تحتاجها. ٤ تساوي 4 وليس 5. ٥ تساوي 5 وليس 0. اقرأ كل رقم بشكل منفصل."
+        systemInstruction: "أنت روبوت نسخ فقط. حوّل الأرقام العربية الهندية إلى غربية: ٠=0 ١=1 ٢=2 ٣=3 ٤=4 ٥=5 ٦=6 ٧=7 ٨=8 ٩=9. تحذير: ٤ تشبه 5 لكنها 4. لا تحسب شيئاً. انسخ فقط."
       }
     });
 
@@ -291,15 +325,9 @@ Output JSON only:
       transcribeData.answers || [];
     const studentName: string = transcribeData.studentName || 'طالب غير معروف';
 
-    if (onProgress) onProgress(50, 100, 'grading');
+    if (onProgress) onProgress(60, 100, 'grading');
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // CALL 2 — JUDGMENT ONLY (text only, no images)
-    // The model now receives the already-transcribed student answers paired
-    // with model answers. No images means it cannot change the transcription.
-    // It checks every arithmetic line independently using derive-and-compare.
-    // ═══════════════════════════════════════════════════════════════════════
-
+    // ── CALL 2: Judgment (text only, uses transcription from Call 1) ───────
     const judgmentItems = flattenedQuestions.map(q => {
       const t = transcribedAnswers.find(a => a.id === q.id);
       return {
@@ -311,85 +339,15 @@ Output JSON only:
       };
     });
 
-    const judgePrompt = isMath
-      ? `You are a mathematics examiner. You receive student answers already transcribed in Western digits.
-You have NO images. The transcriptions are final — do NOT change them.
-
-Items to judge:
-${JSON.stringify(judgmentItems)}
-
-For each item:
-
-A) READ studentTranscription as-is. Copy it into "studentAnswer" unchanged.
-
-B) SPLIT into individual arithmetic lines (split on "|" separator or newlines).
-   For EACH line that contains "=":
-   1. Take everything to the LEFT of "=" as an expression.
-   2. Compute that expression yourself from scratch (do not look at what student wrote on the right).
-   3. Note what the student wrote on the RIGHT of "=".
-   4. If your computed value ≠ student's right-side value → line is WRONG.
-   
-   Check ALL error types:
-   - Wrong result: left side computes to X but student wrote Y on right
-   - Wrong sign: computed -15 but student wrote 15, or computed 15 but wrote -15
-   - Order of operations: × and ÷ before + and −, unless parentheses override
-     "3 + 4 × 2" → must be 3 + 8 = 11, NOT (3+4)×2 = 14
-   - Carried-forward: if line 1 is wrong, any line that uses line 1's result is also wrong
-
-   Store in lineChecks:
-   [{"line": "3+14=17", "leftComputed": 17, "studentWrote": 17, "ok": true},
-    {"line": "17×2=40", "leftComputed": 34, "studentWrote": 40, "ok": false}]
-
-C) GRADE:
-   If any lineCheck has "ok": false → grade = 0.
-   If all lines ok AND final value matches modelAnswer → full maxGrade.
-   Partial credit only for multi-part questions where some parts are right.
-
-Output JSON only:
-{
-  "gradings": [
-    {
-      "questionId": "id",
-      "studentAnswer": "<studentTranscription unchanged>",
-      "lineChecks": [{"line": "...", "leftComputed": <number>, "studentWrote": <number>, "ok": true/false}],
-      "grade": <number>,
-      "maxGrade": <number>,
-      "feedback": "<Arabic: for each wrong line state what student wrote and what correct value is>"
-    }
-  ]
-}`
-      : `You are an examiner. Student answers are already transcribed. No images.
-
-Items:
-${JSON.stringify(judgmentItems)}
-
-For each item compare studentTranscription to modelAnswer:
-- Copy studentTranscription into "studentAnswer" unchanged.
-- Check for essential facts and keywords.
-- Full grade if meaning matches. Partial if some points. Zero if blank or wrong.
-
-Output JSON only:
-{
-  "gradings": [
-    {
-      "questionId": "id",
-      "studentAnswer": "<studentTranscription unchanged>",
-      "grade": <number>,
-      "maxGrade": <number>,
-      "feedback": "<brief Arabic feedback>"
-    }
-  ]
-}`;
-
     const judgeResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts: [{ text: judgePrompt }] },
+      contents: { parts: [{ text: buildJudgePrompt(judgmentItems) }] },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مدقق رياضيات. لديك إجابات الطلاب منسوخة بالأرقام الغربية والإجابات النموذجية. لا توجد صور. مهمتك: لكل سطر في حل الطالب احسب أنت الطرف الأيسر من علامة = بشكل مستقل تماماً، ثم قارن ناتجك بما كتبه الطالب على يمين =. إن اختلفا فالسطر خاطئ والدرجة صفر. افحص كل سطر بهذه الطريقة. لا تغير studentTranscription أبداً. الملاحظات بالعربية."
-          : "أنت مدقق. لديك إجابات الطلاب منسوخة والإجابات النموذجية. قارن بينها وامنح الدرجة. لا تغير نص إجابة الطالب. الملاحظات بالعربية."
+          ? "أنت مدقق رياضيات. لكل سطر في حل الطالب: احسب الطرف الأيسر من = بشكل مستقل، قارن ناتجك بما على يمين =، إن اختلفا فالدرجة صفر. لا تغير studentTranscription. الملاحظات بالعربية."
+          : "أنت مدقق. قارن إجابة الطالب بالنموذج وامنح الدرجة. لا تغير نص إجابة الطالب. الملاحظات بالعربية."
       }
     });
 
@@ -404,12 +362,10 @@ Output JSON only:
 
     const rawGradings: any[] = judgeData.gradings || [];
 
-    // Merge coordinates from transcription back into gradings
     const finalGradings = rawGradings.map((g: any) => {
       const t = transcribedAnswers.find(a => a.id === g.questionId);
       return {
         ...g,
-        // Always use transcribed text as studentAnswer — never the model answer
         studentAnswer: t ? t.text : (g.studentAnswer || ''),
         box: t ? t.box : (g.box || [0, 0, 0, 0]),
         pageIndex: t ? t.pageIndex : (g.pageIndex ?? 0),
