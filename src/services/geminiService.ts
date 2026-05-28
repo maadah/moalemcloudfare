@@ -229,149 +229,104 @@ export async function gradeStudentPaper(
     // No judgment, no math, no context that could trigger auto-correction.
     // ═══════════════════════════════════════════════════════════════════════
 
-    const questionLocators = flattenedQuestions.map(q => ({
+    // ═══════════════════════════════════════════════════════════════════════
+    // SINGLE CALL — Self-comparison approach
+    // The model receives the question, sees the student paper, and must:
+    //   1. Copy the student answer exactly as written (with digit conversion)
+    //   2. Solve the question ITSELF independently
+    //   3. Compare ITS OWN answer with the student's copied answer
+    // This way the comparison is between two things the model computed
+    // in the same context, making it much harder to "auto-correct" the
+    // student's answer without noticing the discrepancy.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const questionsForPrompt = flattenedQuestions.map(q => ({
       id: q.id,
       label: q.label,
-      questionText: q.text
+      questionText: q.text,
+      maxGrade: q.grade,
+      ...(isMath ? {} : { modelAnswer: q.answer })
     }));
 
-    const transcribePrompt = `You are a transcription robot. You can only copy text. You have zero math ability.
+    const singlePrompt = `You are examining a student paper. Questions${isMath ? " (math)" : ""}:
+${JSON.stringify(questionsForPrompt)}
 
-Your job: find each student answer on the paper and copy it character by character into Western digits.
+DIGIT TABLE (Arabic → Western): ٠=0 ١=1 ٢=2 ٣=3 ٤=4 ٥=5 ٦=6 ٧=7 ٨=8 ٩=9
+WARNING: ٤ looks like 5 but is 4. Read every digit shape individually from this table.
 
-DIGIT CONVERSION TABLE — use this for every digit you see:
-  ٠ → 0   ١ → 1   ٢ → 2   ٣ → 3   ٤ → 4   ٥ → 5   ٦ → 6   ٧ → 7   ٨ → 8   ٩ → 9
-  DANGER: ٤ looks like Western 5 but it is 4. ٥ looks like 0 but it is 5.
-  Read each digit shape in isolation using only the table above.
+For EVERY question do exactly these steps:
 
-Questions to locate (NO correct answers given — you do not need them):
-${JSON.stringify(questionLocators)}
+${isMath ? `STEP 1 — COPY student answer digit by digit from the paper:
+  Read each digit using the table above. Copy signs, operators, parentheses as-is.
+  Copy ALL working lines joined with " | ".
+  Store as studentAnswer. Do NOT change any value.
 
-For each question:
-1. Find the student answer area in the images.
-2. Copy every character exactly: digits (convert using table), signs (+, -, ×, ÷, =), parentheses, variables.
-3. Copy ALL lines of working, joined with " | " between lines.
-4. Do NOT compute anything. Do NOT change any digit value. You are a camera, not a calculator.
-5. If blank → write "BLANK".
+STEP 2 — SOLVE the question yourself independently:
+  Read the questionText and compute the correct answer yourself from scratch.
+  Do not look at what the student wrote. Just solve it.
+  Store your answer as myAnswer.
+
+STEP 3 — COMPARE studentAnswer with myAnswer:
+  Look at the final numeric result in studentAnswer.
+  Look at your myAnswer.
+  Are they equal in both value AND sign?
+    YES → student is correct → full grade
+    NO  → student is wrong → grade = 0
+  
+  State clearly: "student wrote X, correct answer is Y"
+  Do not give benefit of the doubt. Numbers must match exactly.` 
+: `STEP 1 — COPY student answer from the paper into studentAnswer.
+STEP 2 — Compare studentAnswer with modelAnswer for essential facts/keywords.
+STEP 3 — Assign grade: full if meaning matches, partial if some points, 0 if blank/wrong.`}
 
 Output JSON only:
 {
-  "studentName": "name visible on paper or طالب",
-  "answers": [
+  "studentName": "name from paper or طالب",
+  "gradings": [
     {
-      "id": "question id",
-      "text": "exact transcription in Western digits",
+      "questionId": "id",
+      "studentAnswer": "<copied from paper, never changed>",
+      ${isMath ? '"myAnswer": "<your own computed answer>",' : ""}
+      "grade": <number>,
+      "maxGrade": <number>,
+      "feedback": "<Arabic: state what student wrote vs correct answer>",
       "box": [ymin, xmin, ymax, xmax],
-      "pageIndex": 0
+      "pageIndex": <0-based>
     }
   ]
 }`;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Run CALL 1 (transcription) and CALL 2 (judgment) in PARALLEL
-    // Call 1: images only, no model answers → pure digit conversion
-    // Call 2: uses a temporary "blank" transcription as placeholder;
-    //         its real job is to judge once we merge results below.
-    // Actually: Call 2 needs Call 1 results, so we run Call 1 first,
-    // but we make Call 1 as lightweight as possible (no judgment needed).
-    // Both calls use the same fast flash model.
-    // ═══════════════════════════════════════════════════════════════════════
+    const singleParts: any[] = base64ImagesData.map(d => ({ inlineData: { data: d, mimeType: "image/jpeg" } }));
+    singleParts.push({ text: singlePrompt });
 
-    // Build judge prompt builder so we can call it after transcription
-    const buildJudgePrompt = (items: any[]) => isMath
-      ? `You are a mathematics examiner. Student answers are in Western digits. No images.
-
-Items:
-${JSON.stringify(items)}
-
-For each item:
-A) Copy studentTranscription into "studentAnswer" unchanged.
-B) For each arithmetic line containing "=", split on "|" or newlines:
-   - Compute the LEFT side of "=" yourself from scratch.
-   - Compare to what student wrote on the RIGHT of "=".
-   - If different → line is WRONG.
-   Check: wrong result, wrong sign, order of operations (× ÷ before + −), carried-forward errors.
-   lineChecks: [{"line":"...","leftComputed":<n>,"studentWrote":<n>,"ok":true/false}]
-C) Any lineCheck ok=false → grade=0. All ok + matches modelAnswer → full grade.
-
-Output JSON:
-{"gradings":[{"questionId":"id","studentAnswer":"<unchanged>","lineChecks":[...],"grade":<n>,"maxGrade":<n>,"feedback":"<Arabic>"}]}`
-      : `Examiner. No images. Compare studentTranscription to modelAnswer for facts/keywords.
-Items: ${JSON.stringify(items)}
-Output JSON: {"gradings":[{"questionId":"id","studentAnswer":"<studentTranscription unchanged>","grade":<n>,"maxGrade":<n>,"feedback":"<Arabic>"}]}`;
-
-    // ── CALL 1: Transcription (images, no model answers) ──────────────────
-    const transcribeParts: any[] = base64ImagesData.map(d => ({ inlineData: { data: d, mimeType: "image/jpeg" } }));
-    transcribeParts.push({ text: transcribePrompt });
-
-    const transcribeResponse = await ai.models.generateContent({
+    const singleResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts: transcribeParts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: "أنت روبوت نسخ فقط. حوّل الأرقام العربية الهندية إلى غربية: ٠=0 ١=1 ٢=2 ٣=3 ٤=4 ٥=5 ٦=6 ٧=7 ٨=8 ٩=9. تحذير: ٤ تشبه 5 لكنها 4. لا تحسب شيئاً. انسخ فقط."
-      }
-    });
-
-    let transcribeData: any = { answers: [], studentName: 'طالب غير معروف' };
-    try {
-      transcribeData = JSON.parse(cleanJson(transcribeResponse.text || '{}'));
-    } catch(e) {
-      console.error("Transcribe parse error:", e, "\nRaw:", transcribeResponse.text?.slice(0, 400));
-    }
-
-    const transcribedAnswers: Array<{ id: string; text: string; box: number[]; pageIndex: number }> =
-      transcribeData.answers || [];
-    const studentName: string = transcribeData.studentName || 'طالب غير معروف';
-
-    if (onProgress) onProgress(60, 100, 'grading');
-
-    // ── CALL 2: Judgment (text only, uses transcription from Call 1) ───────
-    const judgmentItems = flattenedQuestions.map(q => {
-      const t = transcribedAnswers.find(a => a.id === q.id);
-      return {
-        id: q.id,
-        questionText: q.text,
-        modelAnswer: q.answer,
-        maxGrade: q.grade,
-        studentTranscription: t ? t.text : 'BLANK'
-      };
-    });
-
-    const judgeResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts: [{ text: buildJudgePrompt(judgmentItems) }] },
+      contents: { parts: singleParts },
       config: {
         responseMimeType: "application/json",
         temperature: 0,
         systemInstruction: isMath
-          ? "أنت مدقق رياضيات. لكل سطر في حل الطالب: احسب الطرف الأيسر من = بشكل مستقل، قارن ناتجك بما على يمين =، إن اختلفا فالدرجة صفر. لا تغير studentTranscription. الملاحظات بالعربية."
-          : "أنت مدقق. قارن إجابة الطالب بالنموذج وامنح الدرجة. لا تغير نص إجابة الطالب. الملاحظات بالعربية."
+          ? "أنت ناظر امتحان رياضيات. لكل سؤال: أولاً انسخ إجابة الطالب حرفياً باستخدام جدول الأرقام (٤=4 وليس 5، ٥=5 وليس 0). ثانياً احل السؤال بنفسك بشكل مستقل واحتفظ بإجابتك. ثالثاً قارن إجابتك أنت بما نسخته من الطالب — إن اختلف الرقم النهائي ولو بواحد فالإجابة خاطئة والدرجة صفر. الفرق بين -41 و-51 يعني خطأ. الفرق بين 28 و29 يعني خطأ. لا تتساهل. الملاحظات بالعربية."
+          : "أنت ناظر امتحان. انسخ إجابة الطالب كما هي ثم قارنها بالنموذج وامنح الدرجة. الملاحظات بالعربية."
       }
     });
 
-    let judgeData: any = { gradings: [] };
+    let singleData: any = { gradings: [], studentName: 'طالب غير معروف' };
     try {
-      judgeData = JSON.parse(cleanJson(judgeResponse.text || '{}'));
+      singleData = JSON.parse(cleanJson(singleResponse.text || '{}'));
     } catch(e) {
-      console.error("Judge parse error:", e, "\nRaw:", judgeResponse.text?.slice(0, 400));
+      console.error("Parse error:", e, "\nRaw:", singleResponse.text?.slice(0, 400));
     }
 
     if (onProgress) onProgress(100, 100, 'grading');
 
-    const rawGradings: any[] = judgeData.gradings || [];
+    const studentName: string = singleData.studentName || 'طالب غير معروف';
+    const rawGradings: any[] = singleData.gradings || [];
 
-    const finalGradings = rawGradings.map((g: any) => {
-      const t = transcribedAnswers.find(a => a.id === g.questionId);
-      return {
-        ...g,
-        studentAnswer: t ? t.text : (g.studentAnswer || ''),
-        box: t ? t.box : (g.box || [0, 0, 0, 0]),
-        pageIndex: t ? t.pageIndex : (g.pageIndex ?? 0),
-        maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
-      };
-    });
+    const finalGradings = rawGradings.map((g: any) => ({
+      ...g,
+      maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
+    }));
 
     const computedTotal = finalGradings.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
 
