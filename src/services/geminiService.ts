@@ -245,47 +245,44 @@ export async function gradeStudentPaper(
     const prompt = `You are reading a student exam paper written in Arabic/Hindi numerals.
 
 CRITICAL — ARABIC-HINDI DIGIT RECOGNITION TABLE (memorize before reading anything):
-  The paper uses Eastern Arabic numerals. Their shapes look NOTHING like Western digits in some cases:
-  ٠ = 0  (circle, like Western 0)
-  ١ = 1  (vertical stroke, like Western 1)
-  ٢ = 2  (looks like Western 2 rotated)
-  ٣ = 3  (looks like Western 3 but reversed/different)
-  ٤ = 4  ← CRITICAL: looks like a backwards "3" or like the number "5" to untrained eyes. IT IS 4, NOT 5.
-  ٥ = 5  (looks like a circle with a tail, like Western 0 with extension. IT IS 5, NOT 0)
-  ٦ = 6  (looks like a "7" or angled stroke)
-  ٧ = 7  (looks like a "V" or Western 7)
-  ٨ = 8  (looks like Western 8)
-  ٩ = 9  (looks like Western 9)
-
-  MOST COMMON MISTAKE TO AVOID:
-  ٤ (four) is frequently misread as 5. If you see a shape that could be ٤ or 5, it is ٤ (four) = 4.
-  Example: "-٤١" means -41, NOT -51. "٣ × (-١٧) = -٤١" means 3 × (-17) = -41 (which is wrong, correct is -51).
+  ٠=0  ١=1  ٢=2  ٣=3  ٤=4  ٥=5  ٦=6  ٧=7  ٨=8  ٩=9
+  WARNING: ٤ looks like Western "5" but it is 4. ٥ looks like "0" with tail but it is 5.
+  Always read digit shapes one by one using this table. Never guess from context.
 
 Questions and model answers:
 ${JSON.stringify(questionsForPrompt)}
 
-For EVERY question, do these steps IN ORDER:
+For EVERY question follow these steps:
 
-STEP 1 — READ DIGIT BY DIGIT (left to right, or right to left for Arabic):
-  Find the student answer area for this question.
-  Read each digit shape one at a time using the table above.
-  Write the Western digit equivalent for each shape you see.
-  Combine them to form the full number.
-  Put the complete expression in "studentAnswer" using Western digits.
-  Do NOT change the numeric value — only convert the script.
-  Example: student wrote "٣ × (-١٧) = -٤١" → studentAnswer = "3 × (-17) = -41"
+STEP 1 — READ THE STUDENT'S FULL SOLUTION digit by digit:
+  Copy every line the student wrote, converting Arabic digits to Western using the table.
+  Copy ALL intermediate steps, not just the final answer.
+  Do NOT change any number. Put everything in "studentAnswer".
 
-STEP 2 — DERIVE the correct result from the operands in studentAnswer:
-  Take operands A and B and operator from what you read in STEP 1.
-  Compute A op B yourself. Store as "derivedResult".
-  Example: studentAnswer has "3 × (-17) = -41" → operands are 3 and -17 → 3 × (-17) = -51 → derivedResult = -51
+STEP 2 — CHECK EVERY SINGLE ARITHMETIC LINE INDEPENDENTLY:
+  The student may have written multiple lines of working. Check EACH line separately.
+  For each line of the form "X = Y" or "A op B = C":
+    a) Identify what is on the LEFT side of "="
+    b) Compute the LEFT side yourself (independently, ignoring what student wrote on right)
+    c) Compare your computed value with what student wrote on the RIGHT side of "="
+    d) If they differ even by 1 → that line is WRONG
 
-STEP 3 — JUDGE by comparing studentAnswer result vs derivedResult:
-  Extract the result R the student wrote (last number after "=") from studentAnswer.
-  Compare R with derivedResult:
-    "-41" vs -51 → they differ → student answer is WRONG → grade = 0
-    "-51" vs -51 → they match → correct → compare with modelAnswer → full grade
-  For text answers: compare studentAnswer with modelAnswer for essential facts.
+  Scan for ALL of these error types on EVERY line:
+  - Wrong arithmetic result: "3+14=20" → you compute 3+14=17 → student wrote 20 → WRONG
+  - Wrong sign: result should be negative but student wrote positive, or vice versa
+  - Carried-forward error: student got line 1 wrong, then used that wrong value in line 2
+    (even if line 2's arithmetic is self-consistent, the value carried forward is wrong)
+  - Order of operations error: student did + before × when they should have done × first
+    Example: "3 + 4 × 2 = 14" → correct is 3+(4×2)=11, student wrote 14=(3+4)×2 → WRONG
+
+  Store all line checks in "lineChecks" array:
+  [{"line": "3+14=17", "leftComputed": 17, "studentWrote": 17, "correct": true},
+   {"line": "17×2=40", "leftComputed": 34, "studentWrote": 40, "correct": false}]
+
+STEP 3 — FINAL JUDGMENT:
+  If ANY line in lineChecks has "correct": false → the whole answer is WRONG → grade = 0
+  Only if ALL lines are correct AND final answer matches modelAnswer → full grade.
+  For text answers: check essential facts/keywords against modelAnswer.
 
 Output JSON only:
 {
@@ -293,11 +290,11 @@ Output JSON only:
   "gradings": [
     {
       "questionId": "id",
-      "studentAnswer": "<Western digit transcription from STEP 1>",
-      "derivedResult": "<your computed result from STEP 2, or null>",
+      "studentAnswer": "<full solution transcribed from STEP 1>",
+      "lineChecks": [{"line": "...", "leftComputed": <number>, "studentWrote": <number>, "correct": true/false}],
       "grade": <number>,
       "maxGrade": <number>,
-      "feedback": "<Arabic: state exactly what student wrote (e.g. -41) vs correct result (e.g. -51)>",
+      "feedback": "<Arabic: list each wrong line and what the correct value should be>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based image index>
     }
@@ -313,7 +310,7 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "أنت ناظر امتحان يقرأ أوراق مكتوبة بالأرقام العربية الهندية. قاعدة حرجة: الرقم ٤ (أربعة) يشبه بصرياً الرقم 5 الإنجليزي لكنه أربعة وليس خمسة. اقرأ كل رقم بشكل مستقل باستخدام جدول التحويل: ٠=0، ١=1، ٢=2، ٣=3، ٤=4، ٥=5، ٦=6، ٧=7، ٨=8، ٩=9. بعد القراءة الصحيحة، احسب ناتج العملية من الأرقام التي قرأتها أنت، ثم قارن ناتجك بما كتبه الطالب — إن اختلفا فالإجابة خاطئة. لا تغير ما قرأته في studentAnswer. الملاحظات بالعربية."
+        systemInstruction: "أنت ناظر امتحان يقرأ أوراق مكتوبة بالأرقام العربية الهندية. قاعدة حرجة في القراءة: ٤ تساوي 4 وليس 5، ٥ تساوي 5 وليس 0. اقرأ كل رقم بشكل مستقل. بعد القراءة، افحص كل سطر في حل الطالب بشكل مستقل: احسب أنت الطرف الأيسر من علامة = واحتفظ بناتجك، ثم قارنه بما كتبه الطالب على يمين =. إن اختلفا ولو بفارق واحد فذلك السطر خاطئ وتكون الدرجة صفر. افحص كل سطر بهذه الطريقة ولا تكتفِ بالنتيجة النهائية. الملاحظات بالعربية."
       }
     });
 
