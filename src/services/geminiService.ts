@@ -48,9 +48,27 @@ const getApiKeyErrorMessage = () => {
   return 'مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.';
 };
 
-const cleanJson = (text: string) => {
-  const match = text.match(/\{[\s\S]*\}/);
-  return match ? match[0] : text;
+const cleanJson = (text: string): string => {
+  if (!text) return '{}';
+
+  // Strip markdown code fences
+  let t = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+
+  // Walk forward from first '{' matching braces to find the real JSON end
+  const start = t.indexOf('{');
+  if (start === -1) return '{}';
+
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < t.length; i++) {
+    if (t[i] === '{') depth++;
+    else if (t[i] === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+
+  return end === -1 ? t.slice(start) : t.slice(start, end + 1);
 };
 
 export async function extractExamFromDualImages(
@@ -255,7 +273,8 @@ Include ALL question ids. box is normalized 0–1000. pageIndex is the image ind
       }
     });
 
-    const ocrData = JSON.parse(cleanJson(ocrResponse.text || '{}'));
+    let ocrData: any = { transcriptions: [], studentName: 'طالب غير معروف' };
+    try { ocrData = JSON.parse(cleanJson(ocrResponse.text || '{}')); } catch(e) { console.error("OCR parse error:", e, "\nRaw:", ocrResponse.text?.slice(0,300)); }
     const transcriptions: Array<{ id: string; rawText: string; box: number[]; pageIndex: number }> =
       ocrData.transcriptions || [];
     const studentName: string = ocrData.studentName || 'طالب غير معروف';
@@ -373,7 +392,8 @@ Output JSON ONLY:
       }
     });
 
-    const judgmentData = JSON.parse(cleanJson(judgmentResponse.text || '{}'));
+    let judgmentData: any = { gradings: [] };
+    try { judgmentData = JSON.parse(cleanJson(judgmentResponse.text || '{}')); } catch(e) { console.error("Judgment parse error:", e, "\nRaw:", judgmentResponse.text?.slice(0,300)); }
     const rawGradings: any[] = judgmentData.gradings || [];
 
     if (onProgress) onProgress(100, 100, 'grading');
