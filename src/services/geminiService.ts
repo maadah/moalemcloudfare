@@ -242,38 +242,50 @@ export async function gradeStudentPaper(
       maxGrade: q.grade
     }));
 
-    const prompt = `You are reviewing a student exam paper.
+    const prompt = `You are reading a student exam paper written in Arabic/Hindi numerals.
+
+CRITICAL — ARABIC-HINDI DIGIT RECOGNITION TABLE (memorize before reading anything):
+  The paper uses Eastern Arabic numerals. Their shapes look NOTHING like Western digits in some cases:
+  ٠ = 0  (circle, like Western 0)
+  ١ = 1  (vertical stroke, like Western 1)
+  ٢ = 2  (looks like Western 2 rotated)
+  ٣ = 3  (looks like Western 3 but reversed/different)
+  ٤ = 4  ← CRITICAL: looks like a backwards "3" or like the number "5" to untrained eyes. IT IS 4, NOT 5.
+  ٥ = 5  (looks like a circle with a tail, like Western 0 with extension. IT IS 5, NOT 0)
+  ٦ = 6  (looks like a "7" or angled stroke)
+  ٧ = 7  (looks like a "V" or Western 7)
+  ٨ = 8  (looks like Western 8)
+  ٩ = 9  (looks like Western 9)
+
+  MOST COMMON MISTAKE TO AVOID:
+  ٤ (four) is frequently misread as 5. If you see a shape that could be ٤ or 5, it is ٤ (four) = 4.
+  Example: "-٤١" means -41, NOT -51. "٣ × (-١٧) = -٤١" means 3 × (-17) = -41 (which is wrong, correct is -51).
 
 Questions and model answers:
 ${JSON.stringify(questionsForPrompt)}
 
 For EVERY question, do these steps IN ORDER:
 
-STEP 1 — COPY FROM PAPER (no thinking, no math):
-  Find the student answer area for this question in the images.
-  Copy every character exactly as it appears on the paper — digits, signs, operators.
-  Put this in "studentAnswer". Do NOT change any character.
+STEP 1 — READ DIGIT BY DIGIT (left to right, or right to left for Arabic):
+  Find the student answer area for this question.
+  Read each digit shape one at a time using the table above.
+  Write the Western digit equivalent for each shape you see.
+  Combine them to form the full number.
+  Put the complete expression in "studentAnswer" using Western digits.
+  Do NOT change the numeric value — only convert the script.
+  Example: student wrote "٣ × (-١٧) = -٤١" → studentAnswer = "3 × (-17) = -41"
 
-STEP 2 — FOR ANY NUMERIC EXPRESSION (A op B = R):
-  Take the operands A and B and the operator that you copied in STEP 1.
-  Compute the correct result YOURSELF from those operands only.
-  Store it as "derivedResult".
-  Examples:
-    you copied "3 × 2 = 5"   → compute 3×2 yourself → derivedResult = 6
-    you copied "85 ÷ 5 = 18" → compute 85÷5 yourself → derivedResult = 17
-    you copied "3 × -5 = -13"→ compute 3×-5 yourself → derivedResult = -15
-    you copied "10 - 7 = 4"  → compute 10-7 yourself → derivedResult = 3
-  Note: × and ÷ are done before + and −.
-  If no numeric expression → derivedResult = null.
+STEP 2 — DERIVE the correct result from the operands in studentAnswer:
+  Take operands A and B and operator from what you read in STEP 1.
+  Compute A op B yourself. Store as "derivedResult".
+  Example: studentAnswer has "3 × (-17) = -41" → operands are 3 and -17 → 3 × (-17) = -51 → derivedResult = -51
 
-STEP 3 — JUDGE:
-  For numeric answers: compare what you copied (studentAnswer) against derivedResult.
-    If they differ → WRONG → grade = 0 for that expression.
-    "5" vs derivedResult 6 → wrong. "-13" vs derivedResult -15 → wrong.
-  Then compare studentAnswer against modelAnswer.
-    If numeric: must match exactly (same digits, same sign).
-    If text: must contain essential facts/keywords.
-  Assign grade accordingly.
+STEP 3 — JUDGE by comparing studentAnswer result vs derivedResult:
+  Extract the result R the student wrote (last number after "=") from studentAnswer.
+  Compare R with derivedResult:
+    "-41" vs -51 → they differ → student answer is WRONG → grade = 0
+    "-51" vs -51 → they match → correct → compare with modelAnswer → full grade
+  For text answers: compare studentAnswer with modelAnswer for essential facts.
 
 Output JSON only:
 {
@@ -281,11 +293,11 @@ Output JSON only:
   "gradings": [
     {
       "questionId": "id",
-      "studentAnswer": "<exact copy from STEP 1, never changed>",
-      "derivedResult": "<your computed result or null>",
+      "studentAnswer": "<Western digit transcription from STEP 1>",
+      "derivedResult": "<your computed result from STEP 2, or null>",
       "grade": <number>,
       "maxGrade": <number>,
-      "feedback": "<Arabic: mention what student wrote, what correct result is>",
+      "feedback": "<Arabic: state exactly what student wrote (e.g. -41) vs correct result (e.g. -51)>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based image index>
     }
@@ -301,7 +313,7 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "أنت ناظر امتحان. لكل سؤال: أولاً انسخ ما كتبه الطالب بالضبط كما هو في الورقة بدون أي تغيير. ثانياً إذا وجدت تعبيراً حسابياً مثل A عملية B = R، احسب أنت ناتج العملية من A وB فقط ولا تنظر لما كتبه الطالب، ثم قارن ناتجك بما نسخته — إن اختلفا فالإجابة خاطئة. ثالثاً قارن ما نسخته بالإجابة النموذجية. لا تغير أبداً ما كتبه الطالب في حقل studentAnswer. الملاحظات بالعربية."
+        systemInstruction: "أنت ناظر امتحان يقرأ أوراق مكتوبة بالأرقام العربية الهندية. قاعدة حرجة: الرقم ٤ (أربعة) يشبه بصرياً الرقم 5 الإنجليزي لكنه أربعة وليس خمسة. اقرأ كل رقم بشكل مستقل باستخدام جدول التحويل: ٠=0، ١=1، ٢=2، ٣=3، ٤=4، ٥=5، ٦=6، ٧=7، ٨=8، ٩=9. بعد القراءة الصحيحة، احسب ناتج العملية من الأرقام التي قرأتها أنت، ثم قارن ناتجك بما كتبه الطالب — إن اختلفا فالإجابة خاطئة. لا تغير ما قرأته في studentAnswer. الملاحظات بالعربية."
       }
     });
 
