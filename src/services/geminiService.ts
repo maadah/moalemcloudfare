@@ -276,12 +276,20 @@ YOUR TASK — for each question, report EXACTLY what the student's handwriting s
 4. Put ONLY the student's FINAL result (value after the last "=") into "studentFinalResult", same numeral system.
 5. Report which numeral system the student used in "numeralSystem": "arabic" or "western".
 
-DO NOT solve the problem. DO NOT write the correct answer into studentAnswer or studentFinalResult.
+6. STEP SANITY CHECK (think in WORDS, not symbols — this avoids auto-completing):
+   For each "=" the student wrote, turn it into an Arabic sentence-question and answer it honestly.
+   Example: student wrote "٣ × ٥ = ١٠" → ask yourself: "ثلاثة ضرب خمسة ينتج عشرة؟" → No, it makes fifteen.
+   Example: student wrote "٣ × ٥ = ١٥" → ask: "ثلاثة ضرب خمسة ينتج خمسة عشر؟" → Yes.
+   Do this for EVERY step the student wrote. If EVERY step's sentence-question is truthfully "yes",
+   set "stepsLookValid": true. If ANY step is "no", set "stepsLookValid": false.
+   This is about the student's OWN steps being internally truthful — NOT about matching the model.
+
+DO NOT solve the problem for the student. DO NOT write the correct answer into studentAnswer or studentFinalResult.
 If the student's result is wrong, you MUST still report their WRONG value. Reporting a wrong value is SUCCESS, not failure.
-Example (Arabic): paper shows "٣ × (-١٧) = -١٤" → studentAnswer="٣ × (-١٧) = -١٤", studentFinalResult="-١٤", numeralSystem="arabic"
-  (even though -١٤ is wrong — report -١٤ because that is the ink.)
+Example (Arabic): paper shows "٣ × (-١٧) = -١٤" → studentAnswer="٣ × (-١٧) = -١٤", studentFinalResult="-١٤", numeralSystem="arabic", stepsLookValid=false
+  (because "ثلاثة ضرب سالب سبعة عشر ينتج سالب اربعة عشر؟" → No, it makes -51.)
 Example with chain: paper shows "(٣+١٤)×٢-٦ = ١٧×٢-٦ = ٣٤-٦ = ٢٨" →
-  studentAnswer="(٣+١٤)×٢-٦ = ١٧×٢-٦ = ٣٤-٦ = ٢٨", studentFinalResult="٢٨", numeralSystem="arabic"
+  studentAnswer="(٣+١٤)×٢-٦ = ١٧×٢-٦ = ٣٤-٦ = ٢٨", studentFinalResult="٢٨", numeralSystem="arabic", stepsLookValid=true
 
 Output JSON only:
 {
@@ -292,6 +300,7 @@ Output JSON only:
       "studentAnswer": "<exact handwriting transcription in the student's own numeral system, all steps joined by ' | '>",
       "studentFinalResult": "<the last result the student wrote, same numeral system>",
       "numeralSystem": "arabic or western",
+      "stepsLookValid": true,
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based>
     }
@@ -323,29 +332,43 @@ Output JSON only:
     const studentName: string = singleData.studentName || 'طالب غير معروف';
     const rawGradings: any[] = singleData.gradings || [];
 
+    // Partial-credit ratio for "steps correct but final result wrong".
+    // Plan (ب): fixed 50% for now; later this can become a per-question field.
+    const PARTIAL_CREDIT_RATIO = 0.5;
+
     const finalGradings = rawGradings.map((g: any) => {
       const q = flattenedQuestions.find(fq => fq.id === g.questionId);
       const maxGrade = g.maxGrade || q?.grade || 0;
       const studentAnswer = g.studentAnswer || '';
 
-      // ── JavaScript arithmetic verification ──────────────────────────────
-      // We do NOT trust the AI's judgment. We compute the math ourselves
-      // from what the AI transcribed, then compare against the student's
-      // final result and against the model answer.
-      const check = verifyMathAnswer(studentAnswer, g.studentFinalResult, q?.answer || '');
+      // ── Grading by "final result first" (the teacher's chosen method) ────
+      // 1. Compare the student FINAL result with the MODEL final result.
+      //    - match  -> full marks (also handles units like م², we compare
+      //                number to number, e.g. 18 == 18).
+      //    - no match -> inspect steps:
+      //        * steps look valid but final wrong -> partial credit
+      //        * steps wrong + final wrong        -> zero
+      const check = gradeByFinalResult(
+        studentAnswer,
+        g.studentFinalResult,
+        q?.answer || '',
+        g.stepsLookValid
+      );
 
       let grade = maxGrade;
       let feedback = g.feedback || '';
 
-      if (check.decision === 'wrong') {
+      if (check.decision === 'correct') {
+        grade = maxGrade;
+        feedback = check.reason || feedback || 'اجابة صحيحة.';
+      } else if (check.decision === 'partial') {
+        grade = Math.round(maxGrade * PARTIAL_CREDIT_RATIO * 100) / 100;
+        feedback = check.reason || feedback;
+      } else if (check.decision === 'wrong') {
         grade = 0;
         feedback = check.reason || feedback;
-      } else if (check.decision === 'correct') {
-        grade = maxGrade;
-        feedback = feedback || 'إجابة صحيحة.';
       } else {
-        // 'unknown' — could not verify by JS (text answer, variables, etc.)
-        // fall back to the AI-provided grade if present, else full marks
+        // 'unknown' -> cannot verify (free text). Trust AI grade if present.
         grade = (typeof g.grade === 'number') ? g.grade : maxGrade;
       }
 
@@ -384,7 +407,7 @@ Output JSON only:
 // ════════════════════════════════════════════════════════════════════════
 
 interface VerifyResult {
-  decision: 'correct' | 'wrong' | 'unknown';
+  decision: 'correct' | 'wrong' | 'partial' | 'unknown';
   reason?: string;
 }
 
@@ -476,6 +499,86 @@ function parseNum(v: string | number | undefined | null): number | null {
 function containsVariable(s: string): boolean {
   const cleaned = s.replace(/[×÷]/g, '');
   return /[\u0621-\u064A]|[a-wyzA-WYZ]/.test(cleaned);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Grade using the teacher's chosen method: "final result first".
+//   1. Compare student's final result with the model's final result.
+//      Both are reduced to a pure number (units like م² are stripped), so
+//      ١٨ م² == ١٨ م² compares as 18 == 18.
+//   2. If they match  -> full marks (decision 'correct').
+//   3. If they differ -> we still double-check arithmetic of the FIRST
+//      expression with safeEval (pure numeric problems). Then:
+//        - if the student's steps look valid (stepsLookValid from the AI, or
+//          the chain links are internally consistent) -> 'partial'
+//        - otherwise -> 'wrong'
+// ════════════════════════════════════════════════════════════════════════
+function gradeByFinalResult(
+  studentAnswer: string,
+  studentFinalResult: string,
+  modelAnswer: string,
+  stepsLookValidFromAI?: boolean
+): VerifyResult {
+  if (!studentAnswer || /BLANK/i.test(studentAnswer)) {
+    return { decision: 'wrong', reason: 'لم يكتب الطالب اجابة.' };
+  }
+
+  const studentFinal = parseNum(studentFinalResult) ?? extractLastNumber(studentAnswer);
+  const modelFinal = extractLastNumber(modelAnswer);
+
+  // STEP 1 — final result vs model final result (number to number)
+  if (studentFinal !== null && modelFinal !== null) {
+    if (Math.abs(studentFinal - modelFinal) < 1e-9) {
+      return { decision: 'correct', reason: `الناتج النهائي صحيح: ${formatNum(modelFinal)}.` };
+    }
+    // Final result is wrong. Decide between partial and zero.
+    // If the answer has variables/letters, JS cannot judge the algebra, so we
+    // rely ONLY on the AI's linguistic step-check. For pure-numeric answers we
+    // use our own arithmetic consistency check.
+    const hasVar = containsVariable(studentAnswer);
+    const stepsOk = hasVar ? null : areStepsInternallyConsistent(studentAnswer);
+    const stepsValid = hasVar ? (stepsLookValidFromAI === true) : (stepsOk === true);
+    if (stepsValid) {
+      return {
+        decision: 'partial',
+        reason: `الخطوات سليمة لكن الناتج النهائي خطأ: الصحيح ${formatNum(modelFinal)} والطالب كتب ${formatNum(studentFinal)}.`
+      };
+    }
+    return {
+      decision: 'wrong',
+      reason: `الناتج النهائي خطأ: الصحيح ${formatNum(modelFinal)} والطالب كتب ${formatNum(studentFinal)}.`
+    };
+  }
+
+  // STEP 2 — could not get both numbers (e.g. pure-symbolic). Fall back to the
+  // detailed arithmetic verifier for pure-numeric chains.
+  return verifyMathAnswer(studentAnswer, studentFinalResult, modelAnswer);
+}
+
+// Check whether every evaluable "=" link in the student's working is internally
+// consistent (each side equals the next). Returns true/false, or null if there
+// is nothing numeric to check.
+function areStepsInternallyConsistent(studentAnswer: string): boolean | null {
+  // IMPORTANT: each working line is checked on its OWN. We do NOT compare the
+  // end of one line with the start of the next, because lines separated by "|"
+  // are independent steps (e.g. "٢٠÷٤ = ٥ | ٥+١ = ٦": the ٥ ending line 1 is
+  // not equal to "٥+١" starting line 2 — they are different statements).
+  const rawLines = studentAnswer.split(/\||\n/).map(l => l.trim()).filter(Boolean);
+  let checkedAny = false;
+  for (const line of rawLines) {
+    if (!line.includes('=')) continue;
+    // Within a single line, a = b = c must all be equal.
+    const segs = line.split('=').map(s => s.trim()).filter(Boolean);
+    for (let i = 0; i < segs.length - 1; i++) {
+      const a = safeEval(segs[i]);
+      const b = safeEval(segs[i + 1]);
+      if (a !== null && b !== null) {
+        checkedAny = true;
+        if (Math.abs(a - b) > 1e-9) return false; // a link inside this line is broken
+      }
+    }
+  }
+  return checkedAny ? true : null;
 }
 
 // ════════════════════════════════════════════════════════════════════════
