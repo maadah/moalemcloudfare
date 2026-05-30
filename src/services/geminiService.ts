@@ -462,7 +462,11 @@ function safeEval(expr: string): number | null {
 
 function parseNum(v: string | number | undefined | null): number | null {
   if (v === undefined || v === null) return null;
-  const s = normalizeArabicDigits(String(v)).replace(/−/g, '-').replace(/\s+/g, '');
+  let s = normalizeArabicDigits(String(v)).replace(/−/g, '-');
+  // Drop unit exponents (digit glued after an Arabic letter, e.g. م٢)
+  s = s.replace(/([\u0621-\u064A]+)(\d+)/g, '$1');
+  // Remove Arabic letters (units like م، سم) and whitespace
+  s = s.replace(/[\u0621-\u064A\s]/g, '');
   if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
   return parseFloat(s);
 }
@@ -560,11 +564,33 @@ function verifyMathAnswer(studentAnswer: string, studentFinalResult: string, mod
   return { decision: 'unknown' };
 }
 
-// Extract the last standalone number from a string (handles Arabic digits and signs).
+// Extract the final RESULT number from an answer string.
+// Strategy:
+//  1. Normalize Arabic digits.
+//  2. Strip measurement units that are letters glued to a digit (e.g. م٢ = m²,
+//     سم٣ = cm³). We remove an Arabic letter sequence immediately FOLLOWED by a
+//     digit, because that digit is an exponent of a unit, not a result.
+//  3. Prefer the number that appears AFTER the last "=" sign (the final result).
+//  4. Otherwise take the last standalone number.
 function extractLastNumber(s: string): number | null {
   if (!s) return null;
-  const norm = normalizeArabicDigits(String(s)).replace(/−/g, '-');
-  const matches = norm.match(/-?\d+(\.\d+)?/g);
+  let norm = normalizeArabicDigits(String(s)).replace(/−/g, '-');
+
+  // Remove unit exponents: an Arabic letter (unit like م، سم، مل) directly
+  // followed by a small digit → that digit is an exponent, drop the digit.
+  // e.g. "١٨ م٢" → "١٨ م", "سم٣" → "سم"
+  norm = norm.replace(/([\u0621-\u064A]+)(\d+)/g, '$1');
+
+  // Prefer the part after the last "=" (the student's/model's final result).
+  let target = norm;
+  if (norm.includes('=')) {
+    const parts = norm.split('=');
+    target = parts[parts.length - 1];
+    // If the part after the last "=" has no number, fall back to whole string.
+    if (!/-?\d/.test(target)) target = norm;
+  }
+
+  const matches = target.match(/-?\d+(\.\d+)?/g);
   if (!matches || matches.length === 0) return null;
   return parseFloat(matches[matches.length - 1]);
 }
