@@ -267,29 +267,37 @@ DIGIT vs LETTER DISAMBIGUATION (still important):
     ع (letter Ain) resembles ٤. If the formula uses ع as a symbol (e.g. height), read it as ع, not ٤.
   Use the printed question/model to decide: variable position → letter; number position → digit.
 
-YOUR TASK — for each question, report EXACTLY what the student's handwriting shows:
+YOUR TASK — for each question:
 
-1. Look ONLY at the student's handwritten ink. Ignore the printed question values.
-2. Transcribe EVERY line of the student's working, in the SAME numeral system the student used.
-   Join multiple working lines with " | " between them. Keep ALL intermediate steps.
-3. Put the full transcription into "studentAnswer".
-4. Put ONLY the student's FINAL result (value after the last "=") into "studentFinalResult", same numeral system.
-5. Report which numeral system the student used in "numeralSystem": "arabic" or "western".
+PART A — TRANSCRIBE (copy the ink, do not solve):
+1. Look ONLY at the student's handwritten ink.
+2. Ignore any leading question number such as "٣)" or "ج٣)" — that is the QUESTION NUMBER, not part of the math.
+3. Transcribe EVERY working line in the SAME numeral system the student used, joined by " | ".
+4. Put the full transcription in "studentAnswer".
+5. Put ONLY the student's FINAL result (the value after the last "=") in "studentFinalResult".
+   Do not confuse this with the question number or with a measurement unit (e.g. م², سم³).
+6. Report "numeralSystem": "arabic" or "western".
 
-6. STEP SANITY CHECK (think in WORDS, not symbols — this avoids auto-completing):
-   For each "=" the student wrote, turn it into an Arabic sentence-question and answer it honestly.
-   Example: student wrote "٣ × ٥ = ١٠" → ask yourself: "ثلاثة ضرب خمسة ينتج عشرة؟" → No, it makes fifteen.
-   Example: student wrote "٣ × ٥ = ١٥" → ask: "ثلاثة ضرب خمسة ينتج خمسة عشر؟" → Yes.
-   Do this for EVERY step the student wrote. If EVERY step's sentence-question is truthfully "yes",
-   set "stepsLookValid": true. If ANY step is "no", set "stepsLookValid": false.
-   This is about the student's OWN steps being internally truthful — NOT about matching the model.
+PART B — JUDGE BY READING THE RESULT FIRST, THEN ASKING (think in WORDS):
+This is the key method. For each step the student wrote as "A op B = R":
+  - FIRST read the RESULT R the student wrote — before computing anything.
+  - THEN ask yourself an honest Arabic question: does R come from A op B?
+  Examples:
+    student wrote "٥ × ٧ = ٣٥" → ask: "هل خمسة وثلاثون ناتج من خمسة ضرب سبعة؟" → نعم → this step OK.
+    student wrote "٥ × ٧ = ٣٠" → ask: "هل ثلاثون ناتج من خمسة ضرب سبعة؟" → لا (الناتج خمسة وثلاثون) → this step WRONG.
+    student wrote "(-٧٥) ÷ ٥ = -١٥" → ask: "هل سالب خمسة عشر ناتج من سالب خمسة وسبعين قسمة خمسة؟" → نعم → OK.
+    student wrote "٣ × (-١٧) = -١٤" → ask: "هل سالب اربعة عشر ناتج من ثلاثة ضرب سالب سبعة عشر؟" → لا (الناتج -51) → WRONG.
+  Respect order of operations (× ÷ before + −) and parentheses.
+  Do this for EVERY step, including chains a = b = c.
 
-DO NOT solve the problem for the student. DO NOT write the correct answer into studentAnswer or studentFinalResult.
-If the student's result is wrong, you MUST still report their WRONG value. Reporting a wrong value is SUCCESS, not failure.
-Example (Arabic): paper shows "٣ × (-١٧) = -١٤" → studentAnswer="٣ × (-١٧) = -١٤", studentFinalResult="-١٤", numeralSystem="arabic", stepsLookValid=false
-  (because "ثلاثة ضرب سالب سبعة عشر ينتج سالب اربعة عشر؟" → No, it makes -51.)
-Example with chain: paper shows "(٣+١٤)×٢-٦ = ١٧×٢-٦ = ٣٤-٦ = ٢٨" →
-  studentAnswer="(٣+١٤)×٢-٦ = ١٧×٢-٦ = ٣٤-٦ = ٢٨", studentFinalResult="٢٨", numeralSystem="arabic", stepsLookValid=true
+PART C — VERDICT for the whole question:
+  - If every step is OK AND the final result matches what the math requires → verdict = "correct".
+  - If the final result is wrong but the method/steps are reasonable → verdict = "partial".
+  - If a step is wrong in a way that breaks the solution → verdict = "wrong".
+  Use the printed MODEL ANSWER only as a reference for what the final value should be — NOT to overwrite the student's writing.
+
+CRITICAL: DO NOT write the correct answer into studentAnswer or studentFinalResult.
+If the student's result is wrong, you MUST report their WRONG value as-is. Reporting a wrong value is SUCCESS.
 
 Output JSON only:
 {
@@ -297,10 +305,11 @@ Output JSON only:
   "gradings": [
     {
       "questionId": "id",
-      "studentAnswer": "<exact handwriting transcription in the student's own numeral system, all steps joined by ' | '>",
-      "studentFinalResult": "<the last result the student wrote, same numeral system>",
+      "studentAnswer": "<exact handwriting transcription, student's numeral system, steps joined by ' | ', WITHOUT the question number>",
+      "studentFinalResult": "<the student's final result only, same numeral system>",
       "numeralSystem": "arabic or western",
-      "stepsLookValid": true,
+      "verdict": "correct | partial | wrong",
+      "feedback": "<Arabic: read the result first then state whether it follows from the operands, e.g. 'هل -14 ناتج 3×-17؟ لا، الصحيح -51'>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based>
     }
@@ -341,34 +350,28 @@ Output JSON only:
       const maxGrade = g.maxGrade || q?.grade || 0;
       const studentAnswer = g.studentAnswer || '';
 
-      // ── Grading by "final result first" (the teacher's chosen method) ────
-      // 1. Compare the student FINAL result with the MODEL final result.
-      //    - match  -> full marks (also handles units like م², we compare
-      //                number to number, e.g. 18 == 18).
-      //    - no match -> inspect steps:
-      //        * steps look valid but final wrong -> partial credit
-      //        * steps wrong + final wrong        -> zero
-      const check = gradeByFinalResult(
-        studentAnswer,
-        g.studentFinalResult,
-        q?.answer || '',
-        g.stepsLookValid
-      );
+      // ── Grading is decided by the AI's linguistic verdict ────────────────
+      // No JavaScript math here. The model reads the student's FINAL result
+      // first, then asks itself (in words) whether that result truly follows
+      // from the operands. It returns a verdict: "correct" | "partial" | "wrong".
+      // The model understands context (e.g. "٣)" is a question number, "م٢" is
+      // a unit) which a blind regex cannot — so we trust its verdict.
+      const verdict = String(g.verdict || '').toLowerCase();
 
-      let grade = maxGrade;
+      let grade: number;
       let feedback = g.feedback || '';
 
-      if (check.decision === 'correct') {
+      if (verdict === 'correct') {
         grade = maxGrade;
-        feedback = check.reason || feedback || 'اجابة صحيحة.';
-      } else if (check.decision === 'partial') {
+        feedback = feedback || 'اجابة صحيحة.';
+      } else if (verdict === 'partial') {
         grade = Math.round(maxGrade * PARTIAL_CREDIT_RATIO * 100) / 100;
-        feedback = check.reason || feedback;
-      } else if (check.decision === 'wrong') {
+        feedback = feedback || 'الخطوات سليمة لكن الناتج النهائي خطأ.';
+      } else if (verdict === 'wrong') {
         grade = 0;
-        feedback = check.reason || feedback;
+        feedback = feedback || 'اجابة خاطئة.';
       } else {
-        // 'unknown' -> cannot verify (free text). Trust AI grade if present.
+        // No explicit verdict (e.g. free-text question). Use AI-provided grade.
         grade = (typeof g.grade === 'number') ? g.grade : maxGrade;
       }
 
@@ -399,309 +402,6 @@ Output JSON only:
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// Arithmetic verification engine (pure JavaScript — does NOT use the AI)
-// Takes the transcribed student answer, evaluates the math itself, and
-// decides if the student's final result is correct. This removes reliance
-// on the AI for the judgment step.
-// ════════════════════════════════════════════════════════════════════════
-
-interface VerifyResult {
-  decision: 'correct' | 'wrong' | 'partial' | 'unknown';
-  reason?: string;
-}
-
-// Convert Arabic-Indic (and Persian) digits to Western digits by CODE POINT.
-// This is 100% safe: it maps by Unicode value, never by visual shape, so ٤ is
-// always 4 and is never confused with 5.
-function normalizeArabicDigits(s: string): string {
-  if (!s) return s;
-  const map: Record<string, string> = {
-    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
-    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
-  };
-  return s.replace(/[٠-٩۰-۹]/g, d => map[d] || d);
-}
-
-// Safe arithmetic evaluator: + - × ÷ * / and parentheses, respects order of
-// operations. Returns null if the expression contains letters/variables or is
-// otherwise not pure arithmetic.
-function safeEval(expr: string): number | null {
-  if (!expr) return null;
-  let s = normalizeArabicDigits(expr)
-    .replace(/×/g, '*')
-    .replace(/÷/g, '/')
-    .replace(/−/g, '-')   // unicode minus
-    .replace(/\s+/g, '');
-
-  if (!/^[-+*/().0-9]+$/.test(s)) return null;
-  if (s.length === 0) return null;
-
-  try {
-    let pos = 0;
-    const peek = () => s[pos];
-    const next = () => s[pos++];
-
-    function parseExpression(): number {
-      let value = parseTerm();
-      while (peek() === '+' || peek() === '-') {
-        const op = next();
-        const rhs = parseTerm();
-        value = op === '+' ? value + rhs : value - rhs;
-      }
-      return value;
-    }
-    function parseTerm(): number {
-      let value = parseFactor();
-      while (peek() === '*' || peek() === '/') {
-        const op = next();
-        const rhs = parseFactor();
-        value = op === '*' ? value * rhs : value / rhs;
-      }
-      return value;
-    }
-    function parseFactor(): number {
-      if (peek() === '+') { next(); return parseFactor(); }
-      if (peek() === '-') { next(); return -parseFactor(); }
-      if (peek() === '(') {
-        next();
-        const v = parseExpression();
-        if (peek() === ')') next();
-        return v;
-      }
-      let num = '';
-      while (pos < s.length && /[0-9.]/.test(peek())) num += next();
-      if (num === '') throw new Error('parse error');
-      return parseFloat(num);
-    }
-
-    const result = parseExpression();
-    if (pos !== s.length) return null;
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-function parseNum(v: string | number | undefined | null): number | null {
-  if (v === undefined || v === null) return null;
-  let s = normalizeArabicDigits(String(v)).replace(/−/g, '-');
-  // Drop unit exponents (digit glued after an Arabic letter, e.g. م٢)
-  s = s.replace(/([\u0621-\u064A]+)(\d+)/g, '$1');
-  // Remove Arabic letters (units like م، سم) and whitespace
-  s = s.replace(/[\u0621-\u064A\s]/g, '');
-  if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
-  return parseFloat(s);
-}
-
-// Detect whether a string contains an unknown variable (Arabic or Latin letter)
-// that prevents pure-numeric evaluation. We exclude × and ÷ which are operators.
-function containsVariable(s: string): boolean {
-  const cleaned = s.replace(/[×÷]/g, '');
-  return /[\u0621-\u064A]|[a-wyzA-WYZ]/.test(cleaned);
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// Grade using the teacher's chosen method: "final result first".
-//   1. Compare student's final result with the model's final result.
-//      Both are reduced to a pure number (units like م² are stripped), so
-//      ١٨ م² == ١٨ م² compares as 18 == 18.
-//   2. If they match  -> full marks (decision 'correct').
-//   3. If they differ -> we still double-check arithmetic of the FIRST
-//      expression with safeEval (pure numeric problems). Then:
-//        - if the student's steps look valid (stepsLookValid from the AI, or
-//          the chain links are internally consistent) -> 'partial'
-//        - otherwise -> 'wrong'
-// ════════════════════════════════════════════════════════════════════════
-function gradeByFinalResult(
-  studentAnswer: string,
-  studentFinalResult: string,
-  modelAnswer: string,
-  stepsLookValidFromAI?: boolean
-): VerifyResult {
-  if (!studentAnswer || /BLANK/i.test(studentAnswer)) {
-    return { decision: 'wrong', reason: 'لم يكتب الطالب اجابة.' };
-  }
-
-  const studentFinal = parseNum(studentFinalResult) ?? extractLastNumber(studentAnswer);
-  const modelFinal = extractLastNumber(modelAnswer);
-
-  // STEP 1 — final result vs model final result (number to number)
-  if (studentFinal !== null && modelFinal !== null) {
-    if (Math.abs(studentFinal - modelFinal) < 1e-9) {
-      return { decision: 'correct', reason: `الناتج النهائي صحيح: ${formatNum(modelFinal)}.` };
-    }
-    // Final result is wrong. Decide between partial and zero.
-    // If the answer has variables/letters, JS cannot judge the algebra, so we
-    // rely ONLY on the AI's linguistic step-check. For pure-numeric answers we
-    // use our own arithmetic consistency check.
-    const hasVar = containsVariable(studentAnswer);
-    const stepsOk = hasVar ? null : areStepsInternallyConsistent(studentAnswer);
-    const stepsValid = hasVar ? (stepsLookValidFromAI === true) : (stepsOk === true);
-    if (stepsValid) {
-      return {
-        decision: 'partial',
-        reason: `الخطوات سليمة لكن الناتج النهائي خطأ: الصحيح ${formatNum(modelFinal)} والطالب كتب ${formatNum(studentFinal)}.`
-      };
-    }
-    return {
-      decision: 'wrong',
-      reason: `الناتج النهائي خطأ: الصحيح ${formatNum(modelFinal)} والطالب كتب ${formatNum(studentFinal)}.`
-    };
-  }
-
-  // STEP 2 — could not get both numbers (e.g. pure-symbolic). Fall back to the
-  // detailed arithmetic verifier for pure-numeric chains.
-  return verifyMathAnswer(studentAnswer, studentFinalResult, modelAnswer);
-}
-
-// Check whether every evaluable "=" link in the student's working is internally
-// consistent (each side equals the next). Returns true/false, or null if there
-// is nothing numeric to check.
-function areStepsInternallyConsistent(studentAnswer: string): boolean | null {
-  // IMPORTANT: each working line is checked on its OWN. We do NOT compare the
-  // end of one line with the start of the next, because lines separated by "|"
-  // are independent steps (e.g. "٢٠÷٤ = ٥ | ٥+١ = ٦": the ٥ ending line 1 is
-  // not equal to "٥+١" starting line 2 — they are different statements).
-  const rawLines = studentAnswer.split(/\||\n/).map(l => l.trim()).filter(Boolean);
-  let checkedAny = false;
-  for (const line of rawLines) {
-    if (!line.includes('=')) continue;
-    // Within a single line, a = b = c must all be equal.
-    const segs = line.split('=').map(s => s.trim()).filter(Boolean);
-    for (let i = 0; i < segs.length - 1; i++) {
-      const a = safeEval(segs[i]);
-      const b = safeEval(segs[i + 1]);
-      if (a !== null && b !== null) {
-        checkedAny = true;
-        if (Math.abs(a - b) > 1e-9) return false; // a link inside this line is broken
-      }
-    }
-  }
-  return checkedAny ? true : null;
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// Main verification. Strategy:
-//   1. If the whole answer is pure arithmetic (no variables) → verify EVERY
-//      "=" link in the chain, and verify the student's final result equals the
-//      correct value of the first/original expression. JavaScript decides.
-//   2. If it contains variables/letters → JavaScript cannot solve algebra, so
-//      compare the student's FINAL result against the MODEL answer's final
-//      result (method is free, only the final value matters).
-// ════════════════════════════════════════════════════════════════════════
-function verifyMathAnswer(studentAnswer: string, studentFinalResult: string, modelAnswer: string): VerifyResult {
-  if (!studentAnswer || /BLANK/i.test(studentAnswer)) {
-    return { decision: 'wrong', reason: 'لم يكتب الطالب إجابة.' };
-  }
-
-  const hasVariable = containsVariable(studentAnswer);
-
-  // Split into working lines (joined by "|" in the transcription) and also
-  // handle a single line that contains a chain a = b = c = d.
-  const rawLines = studentAnswer.split(/\||\n/).map(l => l.trim()).filter(Boolean);
-
-  // ── Case 1: PURE ARITHMETIC (no variables) → JavaScript is the judge ──────
-  if (!hasVariable) {
-    // 1a. Determine the "true" value: compute the very FIRST left-hand expression.
-    let trueValue: number | null = null;
-    let firstExpr = '';
-    for (const line of rawLines) {
-      const parts = line.split('=').map(p => p.trim()).filter(Boolean);
-      for (const p of parts) {
-        const v = safeEval(p);
-        if (v !== null) { trueValue = v; firstExpr = p; break; }
-      }
-      if (trueValue !== null) break;
-    }
-
-    // 1b. Verify every "=" link across the entire chain (all lines).
-    // Collect all segments separated by "=" across all lines in order.
-    const allSegments: string[] = [];
-    for (const line of rawLines) {
-      for (const seg of line.split('=')) {
-        const t = seg.trim();
-        if (t) allSegments.push(t);
-      }
-    }
-    // Every adjacent pair of segments that are both evaluable must be equal.
-    for (let i = 0; i < allSegments.length - 1; i++) {
-      const a = safeEval(allSegments[i]);
-      const b = safeEval(allSegments[i + 1]);
-      if (a !== null && b !== null && Math.abs(a - b) > 1e-9) {
-        return {
-          decision: 'wrong',
-          reason: `خطأ: «${allSegments[i]}» يساوي ${formatNum(a)} لكن الطالب كتب «${allSegments[i + 1]}» = ${formatNum(b)}.`
-        };
-      }
-    }
-
-    // 1c. Compare student's final result to the true value of the first expression.
-    const studentFinal = parseNum(studentFinalResult);
-    if (trueValue !== null && studentFinal !== null) {
-      if (Math.abs(trueValue - studentFinal) > 1e-9) {
-        return {
-          decision: 'wrong',
-          reason: `الناتج الصحيح لـ «${firstExpr}» هو ${formatNum(trueValue)} لكن الطالب كتب ${formatNum(studentFinal)}.`
-        };
-      }
-      return { decision: 'correct', reason: `الناتج صحيح: ${formatNum(trueValue)}.` };
-    }
-
-    // If we cannot find a usable final result, but all links were consistent,
-    // and we have a model answer to compare against, fall through to model compare.
-  }
-
-  // ── Case 2: HAS VARIABLES (algebra) → compare final result with MODEL ─────
-  // Extract the final numeric value from the model answer (last number in it).
-  const modelFinal = extractLastNumber(modelAnswer);
-  const studentFinal2 = parseNum(studentFinalResult) ?? extractLastNumber(studentAnswer);
-
-  if (modelFinal !== null && studentFinal2 !== null) {
-    return Math.abs(modelFinal - studentFinal2) < 1e-9
-      ? { decision: 'correct', reason: `الناتج النهائي صحيح: ${formatNum(modelFinal)}.` }
-      : { decision: 'wrong', reason: `الناتج النهائي الصحيح ${formatNum(modelFinal)} لكن الطالب كتب ${formatNum(studentFinal2)}.` };
-  }
-
-  // Could not verify with confidence → let the caller fall back.
-  return { decision: 'unknown' };
-}
-
-// Extract the final RESULT number from an answer string.
-// Strategy:
-//  1. Normalize Arabic digits.
-//  2. Strip measurement units that are letters glued to a digit (e.g. م٢ = m²,
-//     سم٣ = cm³). We remove an Arabic letter sequence immediately FOLLOWED by a
-//     digit, because that digit is an exponent of a unit, not a result.
-//  3. Prefer the number that appears AFTER the last "=" sign (the final result).
-//  4. Otherwise take the last standalone number.
-function extractLastNumber(s: string): number | null {
-  if (!s) return null;
-  let norm = normalizeArabicDigits(String(s)).replace(/−/g, '-');
-
-  // Remove unit exponents: an Arabic letter (unit like م، سم، مل) directly
-  // followed by a small digit → that digit is an exponent, drop the digit.
-  // e.g. "١٨ م٢" → "١٨ م", "سم٣" → "سم"
-  norm = norm.replace(/([\u0621-\u064A]+)(\d+)/g, '$1');
-
-  // Prefer the part after the last "=" (the student's/model's final result).
-  let target = norm;
-  if (norm.includes('=')) {
-    const parts = norm.split('=');
-    target = parts[parts.length - 1];
-    // If the part after the last "=" has no number, fall back to whole string.
-    if (!/-?\d/.test(target)) target = norm;
-  }
-
-  const matches = target.match(/-?\d+(\.\d+)?/g);
-  if (!matches || matches.length === 0) return null;
-  return parseFloat(matches[matches.length - 1]);
-}
-
-function formatNum(n: number): string {
-  // Show integers without decimals, keep decimals otherwise
-  return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
-}
 
 async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
   return new Promise((resolve, reject) => {
