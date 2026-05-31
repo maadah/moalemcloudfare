@@ -287,14 +287,27 @@ For each step the student wrote as "LEFT = RIGHT":
   Example: "٥ × ٧ = ٣٠" → "هل ثلاثون ناتج من خمسة ضرب سبعة؟" → لا (الناتج ٣٥) → WRONG.
   Apply to EVERY step and every link in a chain a = b = c.
 
+  *** A RESULT HAS TWO PARTS: THE NUMBER (magnitude) AND THE SIGN. BOTH must be correct. ***
+  A correct sign with a wrong number is STILL WRONG. A correct number with a wrong sign is STILL WRONG.
+  Do NOT say "the sign is right so it is correct" — you must ALSO check the number itself.
+  Example: "٣ × (-٥) = -٢٠" → the sign is negative (correct direction), BUT the NUMBER is wrong:
+    "هل عشرون ناتج من ثلاثة ضرب خمسة؟" → لا (الناتج ١٥). So -٢٠ ≠ -١٥ → WRONG.
+  Always verify the digits, never approve a step just because the sign matches.
+
 GENERAL MATH RULES — apply whichever fit each question (these are universal, not tied to any one problem):
 
 RULE 1 — INTEGER ARITHMETIC & SIGNS (+ − × ÷):
-  Verify each result. Track signs carefully:
-   - negative × negative = positive; negative × positive = negative.
-   - negative ÷ negative = positive; negative ÷ positive = negative.
-   - subtracting a larger number from a smaller gives a negative.
-  Ask the sign too: "هل الإشارة صحيحة؟" e.g. "(-٧٥) ÷ ٥ = ١٥" is wrong because the sign must be negative.
+  Verify the NUMBER and the SIGN as TWO SEPARATE checks — both must pass.
+  Sign rules: negative × negative = positive; negative × positive = negative;
+              negative ÷ negative = positive; negative ÷ positive = negative;
+              subtracting a larger number from a smaller gives a negative.
+  Check 1 (number): does the magnitude match? e.g. ٣ × ٥ must give 15 — not 20, not 10.
+  Check 2 (sign):   is the sign right? e.g. (-٧٥) ÷ ٥ must be negative.
+  A step is correct ONLY if BOTH checks pass. Examples of WRONG steps:
+   - "٣ × (-٥) = -٢٠" → sign correct but number wrong (should be -١٥) → WRONG.
+   - "٣ × (-٥) = ١٥"  → number correct but sign wrong (should be -١٥) → WRONG.
+   - "(-٧٥) ÷ ٥ = ١٥" → number correct but sign wrong (should be -١٥) → WRONG.
+  NEVER approve a step merely because the sign direction looks right.
 
 RULE 2 — ORDER OF OPERATIONS (priority): brackets → exponents/roots → × and ÷ (left to right) → + and − (left to right).
   Example: "٣ + ٤ × ٢" must be 3+(4×2)=11, NOT (3+4)×2=14.
@@ -377,7 +390,7 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "أنت تقرأ ما كتبه الطالب بخط يده على ورقة الامتحان. أنت لا تحل الامتحان. قاعدة مهمة: ابقَ في نظام الأرقام الذي استخدمه الطالب؛ إذا كتب بالأرقام العربية ٠١٢٣٤٥٦٧٨٩ فانسخ بالعربية نفسها ولا تحوّلها إلى إنجليزية، وإذا كتب بالإنجليزية فابقَ بالإنجليزية، لأن التحويل سبب الخطأ (٤ تشبه 5 الإنجليزية). انسخ كل أسطر حل الطالب بالكامل وافصل بينها بـ ' | '. السؤال والنموذج المطبوعان يساعدانك فقط على تمييز الحروف (ح تشبه ٢، ع تشبه ٤) عن الأرقام. انسخ ما يظهره خط الطالب بالضبط حتى لو كان خطأً؛ نقل القيمة الخاطئة نجاح وليس فشلاً، ولا تضع النتيجة الصحيحة أبداً."
+        systemInstruction: "أنت تقرأ ما كتبه الطالب بخط يده على ورقة الامتحان. أنت لا تحل الامتحان. قاعدة مهمة: ابقَ في نظام الأرقام الذي استخدمه الطالب؛ إذا كتب بالأرقام العربية ٠١٢٣٤٥٦٧٨٩ فانسخ بالعربية نفسها ولا تحوّلها إلى إنجليزية، وإذا كتب بالإنجليزية فابقَ بالإنجليزية، لأن التحويل سبب الخطأ (٤ تشبه 5 الإنجليزية). انسخ كل أسطر حل الطالب بالكامل وافصل بينها بـ ' | '. السؤال والنموذج المطبوعان يساعدانك فقط على تمييز الحروف (ح تشبه ٢، ع تشبه ٤) عن الأرقام. انسخ ما يظهره خط الطالب بالضبط حتى لو كان خطأً؛ نقل القيمة الخاطئة نجاح وليس فشلاً، ولا تضع النتيجة الصحيحة أبداً. عند الحكم: الناتج له جزآن، الرقم والإشارة، وكلاهما يجب أن يكون صحيحاً. لا تقبل ناتجاً لمجرد أن إشارته صحيحة؛ تحقق من الرقم نفسه أيضاً. مثال: ٣×(-٥)=-٢٠ إشارته سالبة صحيحة لكن الرقم خطأ (الصحيح -١٥) فهو خاطئ."
       }
     });
 
