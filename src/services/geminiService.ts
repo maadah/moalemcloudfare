@@ -247,8 +247,8 @@ export async function gradeStudentPaper(
 
     if (onProgress) onProgress(0, 100, 'grading');
 
-    const textOnlySubjects = ['أحياء', 'قواعد', 'إسلامية', 'إنجليزي'];
-    const isMath = !textOnlySubjects.some(s => subject.includes(s));
+    // Note: question type (numeric vs textual) is now auto-detected by the AI
+    // PER QUESTION inside the prompt, so we no longer branch on the subject.
 
     // ═══════════════════════════════════════════════════════════════════════
     // CALL 1 — TRANSCRIPTION ONLY (images → Western digits, no answers given)
@@ -335,7 +335,30 @@ PART A — TRANSCRIBE (copy the ink, do not solve):
   Reporting a messy/wrong/partial transcription is correct behavior. Substituting the clean
   model answer is a serious error.
 
-PART B — JUDGE BY READING THE RESULT FIRST, THEN ASKING (the core method, think in WORDS):
+PART B — FIRST DECIDE THE QUESTION TYPE, THEN JUDGE ACCORDINGLY:
+
+For EACH question, first look at the MODEL ANSWER and the student's answer and decide the type:
+
+  TYPE 1 — NUMERIC/CALCULATION (the answer is a number or a math expression with a final value,
+           e.g. arithmetic, equations, fractions, physics/chemistry calculations):
+           → Judge by the FINAL RESULT (see PART C). Use the math rules below as needed.
+
+  TYPE 2 — TEXTUAL/CONCEPTUAL (the answer is a definition, explanation, law statement, reason,
+           list of terms, translation, grammar, essay — common in biology, chemistry theory,
+           islamic studies, arabic/english, and "define/explain/why" questions):
+           → Do NOT look for a numeric "final result". Instead compare MEANING:
+              * Does the student's answer contain the essential facts / keywords / concepts that
+                the MODEL ANSWER requires?
+              * Full marks if the core meaning matches (wording may differ — accept paraphrases
+                and synonyms). Partial credit if some required points are present and others missing.
+              * Zero only if blank, irrelevant, or fundamentally wrong.
+           → For TYPE 2, set "verdict" to "correct" if the essential meaning is present, "wrong"
+             if it is absent. If only some required points are present, set verdict "correct" and
+             reflect the partial nature in feedback (or use the AI grade field for finer control).
+
+The math method below applies ONLY to TYPE 1 questions:
+
+CORE METHOD FOR TYPE 1 — READ THE RESULT FIRST, THEN ASK (think in WORDS):
 For each step the student wrote as "LEFT = RIGHT":
   - FIRST read the RIGHT side (the result the student wrote) — before you compute anything yourself.
   - THEN ask an honest Arabic question: does the RIGHT side truly come from the LEFT side?
@@ -393,35 +416,30 @@ RULE 9 — WORD PROBLEMS & MULTI-PART: read what the question asks for. For mult
 
 RULE 10 — EQUIVALENT FORMS ARE ACCEPTED (method is free): different but valid methods, or equivalent forms (١/٢ = ٠٫٥ = ٥٠٪, or ٣٤-٦ reached directly vs via ١٧×٢-٦), are CORRECT as long as the FINAL value equals the model's final value. Do not punish a student for solving differently than the model.
 
-PART C — THINK SLOWLY AND VERIFY THE FINAL RESULT BEFORE DECIDING (accuracy over speed):
-  Do NOT rush to a verdict. For each question, reason through these steps carefully, one at a time:
+PART C — DECIDING THE VERDICT (think slowly, accuracy over speed):
 
-  STEP 1 — LOCATE the student's final result.
-           The student writes the final answer at the END of their last line (after the last "=").
-           Point to that exact value. Ignore the intermediate working — only the final value matters.
-
+  FOR TYPE 1 (NUMERIC) QUESTIONS — verify the FINAL RESULT:
+  STEP 1 — LOCATE the student's final result (the value at the END of the last line, after last "=").
+           Ignore the intermediate working — only the final value matters.
   STEP 2 — READ the student's final value digit by digit, then SAY IT IN WORDS to be sure.
            e.g. if you see ٢١, read "٢ ثم ١" → "واحد وعشرون" = 21. If you see ٢, it is "اثنان" = 2.
-           This spoken-words check prevents misreading or dropping a digit. Capture the whole number.
-
   STEP 3 — READ the model answer's final value the same way, in words.
-
   STEP 4 — COMPARE the two values (not their surface text). Accept equivalent forms
            (١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢). Ignore unit symbols (م²، سم³) when comparing the number.
+  STEP 5 — verdict: same value → "correct"; different → "wrong"; blank → "wrong".
+           Do NOT analyze every intermediate line — that causes inconsistency.
 
-  STEP 5 — DECIDE the verdict ONLY from STEP 4:
-             - same value                                   → "correct"
-             - different value                              → "wrong"
-             - blank / nothing written / only question copied → "wrong"
-           Do NOT analyze every intermediate line — that causes inconsistency. The single decision is:
-           does the student's FINAL value equal the model's FINAL value?
-           The earlier RULES exist only to help you understand the work, not to drive the verdict.
+  FOR TYPE 2 (TEXTUAL/CONCEPTUAL) QUESTIONS — compare MEANING with the model answer:
+  STEP 1 — Read the student's written answer (definition / explanation / law / list / translation).
+  STEP 2 — Read the model answer and identify its essential points / keywords / concepts.
+  STEP 3 — Check how many essential points the student covered (wording may differ; accept
+           paraphrases, synonyms, and different but correct phrasing).
+  STEP 4 — verdict: essential meaning present → "correct"; absent/irrelevant/blank → "wrong".
+           If only SOME required points are present, set "verdict":"correct" and put a number in
+           "grade" between 0 and maxGrade reflecting how much was covered (round to whole number).
 
-  Take your time on STEP 1 and STEP 2 — most mistakes come from misreading the final value or
-  picking the wrong line. Be deliberate and consistent: the same paper must always give the same result.
-
-  NEVER overwrite the student's writing with the model answer. The model answer is ONLY a
-  reference for the correct final value.
+  Be deliberate and consistent: the same paper must always give the same result.
+  NEVER overwrite the student's writing with the model answer. The model answer is ONLY a reference.
 
 CRITICAL: DO NOT write the correct answer into studentAnswer or studentFinalResult.
 If the student's result is wrong, you MUST report their WRONG value as-is. Reporting a wrong value is SUCCESS.
@@ -433,11 +451,13 @@ Output JSON only:
     {
       "questionId": "id",
       "studentAnswer": "<exact handwriting transcription, student's numeral system, steps joined by ' | ', WITHOUT the question number>",
-      "studentFinalResult": "<the student's final result only, same numeral system>",
+      "studentFinalResult": "<for TYPE 1: the student's final result only. For TYPE 2: leave empty>",
       "numeralSystem": "arabic or western",
+      "questionType": "numeric or textual",
       "unreadable": false,
       "verdict": "correct | wrong",
-      "feedback": "<Arabic: state the student's final value and the correct final value, e.g. 'الناتج النهائي للطالب ٤١ والصحيح ١٣'>",
+      "grade": <optional number 0..maxGrade for partial textual credit; omit if full/zero>,
+      "feedback": "<Arabic: for numeric say the student's final value vs the correct one; for textual say which points were right/missing>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based>
     }
@@ -503,12 +523,18 @@ Output JSON only:
       if (isBlank) {
         grade = 0;
       } else if (verdict === 'correct') {
-        grade = maxGrade;
+        // Full marks by default. For TYPE 2 (textual) the AI may provide a
+        // partial 'grade' (some required points covered) — honor it if valid.
+        if (typeof g.grade === 'number' && isFinite(g.grade) && g.grade >= 0 && g.grade < maxGrade) {
+          grade = Math.round(g.grade);
+        } else {
+          grade = maxGrade;
+        }
       } else if (verdict === 'wrong') {
         grade = 0;
       } else {
         // No clear verdict (e.g. free-text essay). Use AI-provided grade if any.
-        grade = (typeof g.grade === 'number') ? g.grade : maxGrade;
+        grade = (typeof g.grade === 'number') ? Math.round(g.grade) : maxGrade;
       }
       // Safety clamp
       grade = Math.max(0, Math.min(maxGrade, grade));
