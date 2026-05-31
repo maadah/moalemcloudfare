@@ -323,20 +323,27 @@ RULE 9 — WORD PROBLEMS & MULTI-PART: read what the question asks for. For mult
 
 RULE 10 — EQUIVALENT FORMS ARE ACCEPTED (method is free): different but valid methods, or equivalent forms (١/٢ = ٠٫٥ = ٥٠٪, or ٣٤-٦ reached directly vs via ١٧×٢-٦), are CORRECT as long as the FINAL value equals the model's final value. Do not punish a student for solving differently than the model.
 
-PART C — VERDICT for the whole question:
-  Decision order:
-  1. Compute/locate the FINAL value the question requires. Use the printed MODEL ANSWER as the
-     authority for the correct final value (it is typed and reliable).
-  2. Compare the student's FINAL result to that correct final value:
-       - equal  → the answer is on track.
-       - not equal → the answer is wrong overall, EVEN IF some individual lines were
-         arithmetically self-consistent (the moving-term sign error in RULE 3 is exactly this case).
-  3. Then set the verdict:
-       - every step OK AND final value matches model → verdict = "correct".
-       - final value does NOT match model, but the chosen method was reasonable and only a
-         minor slip occurred → verdict = "partial".
-       - final value wrong due to a broken rule (sign transfer, order of operations, wrong
-         operation) → verdict = "wrong".
+PART C — FINAL RESULT FIRST, THEN ESTIMATE HOW MUCH IS CORRECT:
+  STEP 1 — Identify the correct FINAL value from the printed MODEL ANSWER (it is typed and reliable).
+  STEP 2 — Read the student's FINAL result and turn BOTH into words to compare their VALUE
+           (not their surface text). Accept equivalent forms (e.g. ١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢).
+           Ignore unit symbols (م²، سم³) when comparing the number.
+             - same value  → the student's answer is CORRECT.
+             - different    → the student's answer is WRONG overall (even if some inner lines were
+                              self-consistent — e.g. the sign-transfer error in RULE 3).
+  STEP 3 — ESTIMATE "correctnessRatio" (a number from 0 to 1) = how much of the required solution
+           the student got right:
+             - final value correct                              → 1.0
+             - final value wrong, but most of the work is sound
+               and only a small slip occurred                   → high, e.g. 0.7–0.9
+             - about half the work/parts correct                → ~0.5
+             - only a little correct                            → low, e.g. 0.2–0.3
+             - completely wrong, or wrong from the very start,
+               or blank, or only copied the question            → 0.0
+           For a multi-part question, base the ratio on how many required parts are correct.
+  STEP 4 — Also give a coarse "verdict": "correct" (ratio = 1), "partial" (0 < ratio < 1),
+           or "wrong" (ratio = 0). The numeric grade will be computed from correctnessRatio.
+
   NEVER overwrite the student's writing with the model answer. The model answer is ONLY a
   reference for the correct final value.
 
@@ -353,7 +360,8 @@ Output JSON only:
       "studentFinalResult": "<the student's final result only, same numeral system>",
       "numeralSystem": "arabic or western",
       "verdict": "correct | partial | wrong",
-      "feedback": "<Arabic: read the result first then state whether it follows from the operands, e.g. 'هل -14 ناتج 3×-17؟ لا، الصحيح -51'>",
+      "correctnessRatio": <number from 0 to 1>,
+      "feedback": "<Arabic: compare the student's final value to the correct one, and briefly say what was right and what was wrong, e.g. 'الناتج النهائي للطالب ٤١ والصحيح ١٣ لأن ١٤ يجب أن تُطرح عند النقل؛ الخطوة الأولى سليمة.'>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based>
     }
@@ -385,38 +393,49 @@ Output JSON only:
     const studentName: string = singleData.studentName || 'طالب غير معروف';
     const rawGradings: any[] = singleData.gradings || [];
 
-    // Partial-credit ratio for "steps correct but final result wrong".
-    // Plan (ب): fixed 50% for now; later this can become a per-question field.
-    const PARTIAL_CREDIT_RATIO = 0.5;
-
     const finalGradings = rawGradings.map((g: any) => {
       const q = flattenedQuestions.find(fq => fq.id === g.questionId);
       const maxGrade = g.maxGrade || q?.grade || 0;
       const studentAnswer = g.studentAnswer || '';
 
-      // ── Grading is decided by the AI's linguistic verdict ────────────────
-      // No JavaScript math here. The model reads the student's FINAL result
-      // first, then asks itself (in words) whether that result truly follows
-      // from the operands. It returns a verdict: "correct" | "partial" | "wrong".
-      // The model understands context (e.g. "٣)" is a question number, "م٢" is
-      // a unit) which a blind regex cannot — so we trust its verdict.
+      // ── Grade from the AI's correctnessRatio (0..1) ──────────────────────
+      // The model compares the student's FINAL result to the model answer and
+      // estimates how much of the solution is correct. Grade = max × ratio,
+      // rounded to the nearest WHOLE number. A completely wrong/blank answer
+      // has ratio 0 → grade 0.
       const verdict = String(g.verdict || '').toLowerCase();
 
-      let grade: number;
-      let feedback = g.feedback || '';
-
-      if (verdict === 'correct') {
-        grade = maxGrade;
-        feedback = feedback || 'اجابة صحيحة.';
-      } else if (verdict === 'partial') {
-        grade = Math.round(maxGrade * PARTIAL_CREDIT_RATIO * 100) / 100;
-        feedback = feedback || 'الخطوات سليمة لكن الناتج النهائي خطأ.';
+      // Determine the ratio. Prefer the AI's numeric correctnessRatio; if it is
+      // missing, fall back to the coarse verdict (correct=1, wrong=0, partial=0.5).
+      let ratio: number;
+      if (typeof g.correctnessRatio === 'number' && isFinite(g.correctnessRatio)) {
+        ratio = Math.max(0, Math.min(1, g.correctnessRatio));
+      } else if (verdict === 'correct') {
+        ratio = 1;
       } else if (verdict === 'wrong') {
-        grade = 0;
-        feedback = feedback || 'اجابة خاطئة.';
+        ratio = 0;
+      } else if (verdict === 'partial') {
+        ratio = 0.5;
       } else {
-        // No explicit verdict (e.g. free-text question). Use AI-provided grade.
+        // No info at all (e.g. free-text). Use AI-provided grade if any, else full.
+        ratio = -1; // sentinel: use g.grade
+      }
+
+      let grade: number;
+      if (ratio < 0) {
         grade = (typeof g.grade === 'number') ? g.grade : maxGrade;
+      } else {
+        // No fractions: round to the nearest whole number.
+        grade = Math.round(maxGrade * ratio);
+      }
+      // Safety clamp
+      grade = Math.max(0, Math.min(maxGrade, grade));
+
+      let feedback = g.feedback || '';
+      if (!feedback) {
+        if (ratio >= 1) feedback = 'اجابة صحيحة.';
+        else if (ratio <= 0) feedback = 'اجابة خاطئة.';
+        else feedback = 'اجابة صحيحة جزئياً.';
       }
 
       return {
