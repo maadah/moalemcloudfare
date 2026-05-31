@@ -23,30 +23,69 @@ export interface GradingResult {
   pageIndex?: number;
 }
 
-// Initialize AI on client side as per instructions
-const getApiKey = () => {
-  // Try various common environment variable patterns for Vite/Netlify
-  const viteKey = import.meta.env?.VITE_GEMINI_API_KEY;
-  if (viteKey && viteKey !== 'undefined' && viteKey !== '') return viteKey.trim();
-
-  // Fallback to process.env if available (usually during dev or if polyfilled)
-  try {
-    const envKey = process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY;
-    if (envKey && envKey !== 'undefined' && envKey !== '') return envKey.trim();
-  } catch (e) {
-    // process might not be defined in browser
-  }
-  
-  return (localStorage.getItem('GEMINI_API_KEY_FALLBACK') || '').trim();
+// ── API keys & model from Cloudflare environment variables ──────────────────
+// All keys are read at BUILD time (Vite inlines VITE_* vars). We try them in
+// order; if one fails (quota/invalid/503), we fall back to the next.
+const getApiKeys = (): string[] => {
+  const env: any = (import.meta as any).env || {};
+  const candidates = [
+    env.VITE_GEMINI_API_KEY,
+    env.VITE_GEMINI_API_KEY_2,
+    env.VITE_GEMINI_API_KEY_SECONDARY,
+  ];
+  // Keep only valid, unique, non-empty keys.
+  const keys = candidates
+    .map(k => (typeof k === 'string' ? k.trim() : ''))
+    .filter(k => k && k !== 'undefined');
+  return Array.from(new Set(keys));
 };
 
-const getApiKeyErrorMessage = () => {
-  const isNetlify = window.location.hostname.includes('netlify.app');
-  if (isNetlify) {
-    return 'مفتاح API غير مضبوط. إذا كنت تستخدم Netlify، تأكد من إضافة المفتاح باسم VITE_GEMINI_API_KEY في إعدادات البيئة (Environment Variables). يمكنك أيضاً إدخاله يدوياً من أيقونة الإعدادات (⚙️) في الأعلى.';
-  }
-  return 'مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.';
+const getModelName = (): string => {
+  const env: any = (import.meta as any).env || {};
+  const m = env.VITE_GEMINI_MODEL;
+  return (typeof m === 'string' && m.trim()) ? m.trim() : 'gemini-2.5-flash';
 };
+
+const getApiKeyErrorMessage = () =>
+  'مفتاح API غير مضبوط. يرجى التأكد من إضافة المفاتيح (VITE_GEMINI_API_KEY) في إعدادات البيئة (Environment Variables) في Cloudflare ثم إعادة النشر.';
+
+// Decide whether an error is worth retrying with a DIFFERENT key.
+const isRetryableKeyError = (err: any): boolean => {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('api key') ||        // invalid / not found
+    msg.includes('api_key') ||
+    msg.includes('permission') ||
+    msg.includes('quota') ||          // quota exhausted
+    msg.includes('resource_exhausted') ||
+    msg.includes('429') ||            // rate limited
+    msg.includes('503') ||            // overloaded
+    msg.includes('overloaded') ||
+    msg.includes('unavailable')
+  );
+};
+
+// Central call: try each API key in turn until one succeeds.
+async function generateWithFallback(request: any): Promise<any> {
+  const keys = getApiKeys();
+  if (keys.length === 0) throw new Error(getApiKeyErrorMessage());
+
+  const model = getModelName();
+  let lastError: any = null;
+
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: keys[i] });
+      return await ai.models.generateContent({ model, ...request });
+    } catch (err) {
+      lastError = err;
+      console.warn(`API key #${i + 1} failed:`, String((err as any)?.message || err));
+      // Only move to the next key if the error is key/quota/availability related.
+      if (!isRetryableKeyError(err)) break;
+    }
+  }
+  throw lastError || new Error('فشل الاتصال بخدمة الذكاء الاصطناعي.');
+}
 
 const cleanJson = (text: string): string => {
   if (!text) return '{}';
@@ -76,9 +115,6 @@ export async function extractExamFromDualImages(
   answerImages: string[]
 ): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
 
     const qImagesData = await Promise.all(questionImages.map(async (base64) => {
       return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
@@ -109,8 +145,7 @@ export async function extractExamFromDualImages(
     aImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await generateWithFallback({
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
@@ -133,9 +168,6 @@ export async function extractExamFromDualImages(
 
 export async function extractExamFromImages(base64Images: string[]): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
 
     const imagesData = await Promise.all(base64Images.map(async (base64) => {
       return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
@@ -157,8 +189,7 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     const parts: any[] = imagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await generateWithFallback({
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
@@ -188,9 +219,6 @@ export async function gradeStudentPaper(
   onProgress?: (current: number, total: number, phase: 'compressing' | 'grading') => void
 ): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
   try {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error(getApiKeyErrorMessage());
-    const ai = new GoogleGenAI({ apiKey });
 
     if (onProgress) onProgress(0, imageUrls.length, 'compressing');
 
@@ -240,11 +268,16 @@ export async function gradeStudentPaper(
     // student's answer without noticing the discrepancy.
     // ═══════════════════════════════════════════════════════════════════════
 
+    // Secret watermark appended to every model answer. The student cannot write
+    // this by hand, so if it appears in the transcribed student answer, the AI
+    // copied the model answer instead of reading the student's ink.
+    const COPY_MARKER = '\u00A5\u00A5'; // ¥¥
+
     const questionsForPrompt = flattenedQuestions.map(q => ({
       id: q.id,
       label: q.label,
       questionText: q.text,
-      modelAnswer: q.answer,
+      modelAnswer: (q.answer ? String(q.answer) + ' ' + COPY_MARKER : q.answer),
       maxGrade: q.grade
     }));
 
@@ -396,8 +429,7 @@ Output JSON only:
     const singleParts: any[] = base64ImagesData.map(d => ({ inlineData: { data: d, mimeType: "image/jpeg" } }));
     singleParts.push({ text: singlePrompt });
 
-    const singleResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const singleResponse = await generateWithFallback({
       contents: { parts: singleParts },
       config: {
         responseMimeType: "application/json",
@@ -421,7 +453,19 @@ Output JSON only:
     const finalGradings = rawGradings.map((g: any) => {
       const q = flattenedQuestions.find(fq => fq.id === g.questionId);
       const maxGrade = g.maxGrade || q?.grade || 0;
-      const studentAnswer = g.studentAnswer || '';
+      let studentAnswer = g.studentAnswer || '';
+
+      // ── Secret-marker copy detection (most reliable) ─────────────────────
+      // We appended ¥¥ to the model answer the AI saw. A student cannot write
+      // ¥¥ by hand. If it shows up in the transcription, the AI copied the
+      // model answer. Detect it, then strip it from all visible fields.
+      const markerCopied =
+        studentAnswer.includes(COPY_MARKER) ||
+        String(g.studentFinalResult || '').includes(COPY_MARKER);
+      // Strip the marker (and any stray ¥) from anything we will display.
+      const stripMarker = (s: string) => String(s || '').split(COPY_MARKER).join('').replace(/\u00A5/g, '').trim();
+      studentAnswer = stripMarker(studentAnswer);
+      if (g.studentFinalResult) g.studentFinalResult = stripMarker(g.studentFinalResult);
 
       // ── Grade from the AI's correctnessRatio (0..1) ──────────────────────
       // The model compares the student's FINAL result to the model answer and
@@ -463,11 +507,14 @@ Output JSON only:
         else feedback = 'اجابة صحيحة جزئياً.';
       }
 
-      // ── Copy-detection: if the transcribed answer is almost identical to the
-      // model answer, the AI likely copied the model instead of reading the
-      // student's messy ink. Flag it for manual review.
+      // ── Copy-detection (two layers) ─────────────────────────────────────
+      // Layer 1 (definitive): the secret ¥¥ marker appeared → the AI copied the
+      // model answer for sure. Layer 2 (heuristic): the text is nearly identical
+      // to the model answer. Either way, flag for manual review.
       const modelAns = q?.answer || '';
-      if (modelAns && looksCopiedFromModel(studentAnswer, modelAns)) {
+      if (markerCopied) {
+        feedback = '\u26A0\uFE0F تحذير: تم اكتشاف نسخ الاجابة النموذجية بدل قراءة خط الطالب. يجب المراجعة اليدوية. ' + feedback;
+      } else if (modelAns && looksCopiedFromModel(studentAnswer, modelAns)) {
         feedback = '\u26A0\uFE0F تحذير: قد يكون استخراج اجابة الطالب غير دقيق (تشبه الاجابة النموذجية كثيراً). يُرجى المراجعة اليدوية. ' + feedback;
       }
       if (g.unreadable === true) {
