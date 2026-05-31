@@ -311,6 +311,17 @@ PART A — TRANSCRIBE (copy the ink, do not solve):
    Do not confuse this with the question number or with a measurement unit (e.g. م², سم³).
 6. Report "numeralSystem": "arabic" or "western".
 
+7. READING FRACTIONS CORRECTLY (critical — do NOT flip them):
+   A fraction is written with the NUMERATOR on TOP and the DENOMINATOR on the BOTTOM, separated by
+   a horizontal bar. Transcribe it as "top/bottom" — top number first, bottom number second.
+   - "٣ over ٤" (٣ on top, ٤ below) → "٣/٤". Do NOT write it as "٤/٣".
+   - NEVER swap numerator and denominator. NEVER turn a fraction into its reciprocal while reading.
+   - If a multiplication of fractions is written (e.g. ٣/٤ × ١/٢ × ٤/٧), copy each fraction EXACTLY
+     as it sits on the paper (top/bottom), keeping every × as multiplication. Do not invent a
+     division or a reciprocal that the student did not write.
+   - Read the TOP row of all fractions first to be sure which digits are numerators, then the
+     bottom row for denominators, before writing them as top/bottom.
+
 *** ANTI-COPY WARNING (very important) ***
   The MODEL ANSWER is printed in the data above. You must NEVER copy it into studentAnswer.
   The student's handwriting is messy and often DIFFERENT from the model. If the student's
@@ -362,9 +373,16 @@ RULE 3 — SOLVING EQUATIONS (a variable س/ص/ع/x with "="): moving a term acr
   Example: "س + ١٤ = ٢٧" → correct "س = ٢٧ - ١٤ = ١٣"; if student wrote "س = ٢٧ + ١٤ = ٤١" the
   arithmetic ٢٧+١٤=٤١ is true on its own but the transfer was wrong → WRONG (model says ١٣).
 
-RULE 4 — FRACTIONS: 
+RULE 4 — FRACTIONS:
+  - FIRST make sure you READ each fraction correctly (top = numerator, bottom = denominator).
+    Many false errors come from the READER flipping a fraction, not from the student. If your
+    reading would make the student's answer look like "multiplying reciprocals", double-check that
+    you did not flip the fractions yourself. Trust the ink: top/bottom as written.
   - addition/subtraction needs a common denominator; "١/٢ + ١/٣ = ٢/٥" is WRONG (correct ٥/٦).
   - multiplication multiplies numerators and denominators; division multiplies by the reciprocal.
+  - For a product like "٣/٤ × ١/٢ × ٤/٧": numerator = ٣×١×٤ = ١٢, denominator = ٤×٢×٧ = ٥٦,
+    so ١٢/٥٦ = ٣/١٤ after simplifying. Only treat a fraction as flipped if the student ACTUALLY
+    wrote a division sign (÷) — never assume reciprocals on your own.
   - a fraction should be checked in lowest terms if the model is reduced (e.g. ٢/٤ = ١/٢).
 
 RULE 5 — EXPONENTS & ROOTS: "أُس" means repeated multiplication (٢³ = ٢×٢×٢ = ٨, not ٢×٣=٦).
@@ -434,7 +452,7 @@ Output JSON only:
       config: {
         responseMimeType: "application/json",
         temperature: 0,
-        systemInstruction: "أنت تقرأ ما كتبه الطالب بخط يده على ورقة الامتحان. أنت لا تحل الامتحان. قاعدة مهمة: ابقَ في نظام الأرقام الذي استخدمه الطالب؛ إذا كتب بالأرقام العربية ٠١٢٣٤٥٦٧٨٩ فانسخ بالعربية نفسها ولا تحوّلها إلى إنجليزية، وإذا كتب بالإنجليزية فابقَ بالإنجليزية، لأن التحويل سبب الخطأ (٤ تشبه 5 الإنجليزية). انسخ كل أسطر حل الطالب بالكامل وافصل بينها بـ ' | '. السؤال والنموذج المطبوعان يساعدانك فقط على تمييز الحروف (ح تشبه ٢، ع تشبه ٤) عن الأرقام. انسخ ما يظهره خط الطالب بالضبط حتى لو كان خطأً؛ نقل القيمة الخاطئة نجاح وليس فشلاً، ولا تضع النتيجة الصحيحة أبداً. عند الحكم: الناتج له جزآن، الرقم والإشارة، وكلاهما يجب أن يكون صحيحاً. لا تقبل ناتجاً لمجرد أن إشارته صحيحة؛ تحقق من الرقم نفسه أيضاً. مثال: ٣×(-٥)=-٢٠ إشارته سالبة صحيحة لكن الرقم خطأ (الصحيح -١٥) فهو خاطئ."
+        systemInstruction: "أنت تقرأ ما كتبه الطالب بخط يده على ورقة الامتحان. أنت لا تحل الامتحان. قاعدة مهمة: ابقَ في نظام الأرقام الذي استخدمه الطالب؛ إذا كتب بالأرقام العربية ٠١٢٣٤٥٦٧٨٩ فانسخ بالعربية نفسها ولا تحوّلها إلى إنجليزية، وإذا كتب بالإنجليزية فابقَ بالإنجليزية، لأن التحويل سبب الخطأ (٤ تشبه 5 الإنجليزية). انسخ كل أسطر حل الطالب بالكامل وافصل بينها بـ ' | '. السؤال والنموذج المطبوعان يساعدانك فقط على تمييز الحروف (ح تشبه ٢، ع تشبه ٤) عن الأرقام. انسخ ما يظهره خط الطالب بالضبط حتى لو كان خطأً؛ نقل القيمة الخاطئة نجاح وليس فشلاً، ولا تضع النتيجة الصحيحة أبداً. عند الحكم: الناتج له جزآن، الرقم والإشارة، وكلاهما يجب أن يكون صحيحاً. لا تقبل ناتجاً لمجرد أن إشارته صحيحة؛ تحقق من الرقم نفسه أيضاً. مثال: ٣×(-٥)=-٢٠ إشارته سالبة صحيحة لكن الرقم خطأ (الصحيح -١٥) فهو خاطئ. عند قراءة الكسور: البسط فوق والمقام تحت، انسخها كما هي (فوق/تحت) ولا تقلبها أبداً، ولا تفترض أن الطالب ضرب بالمقلوب إلا إذا كتب علامة قسمة ÷ صراحةً."
       }
     });
 
