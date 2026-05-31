@@ -278,6 +278,17 @@ PART A — TRANSCRIBE (copy the ink, do not solve):
    Do not confuse this with the question number or with a measurement unit (e.g. م², سم³).
 6. Report "numeralSystem": "arabic" or "western".
 
+*** ANTI-COPY WARNING (very important) ***
+  The MODEL ANSWER is printed in the data above. You must NEVER copy it into studentAnswer.
+  The student's handwriting is messy and often DIFFERENT from the model. If the student's
+  handwriting happens to come out IDENTICAL to the model answer, you are probably copying the
+  model by mistake — re-read the ink and report what is ACTUALLY written, including any messy,
+  wrong, or incomplete steps.
+  If the handwriting is genuinely unreadable, set studentAnswer to what you can see plus "?"
+  for unclear parts, set "unreadable": true, and do NOT fill it in from the model answer.
+  Reporting a messy/wrong/partial transcription is correct behavior. Substituting the clean
+  model answer is a serious error.
+
 PART B — JUDGE BY READING THE RESULT FIRST, THEN ASKING (the core method, think in WORDS):
 For each step the student wrote as "LEFT = RIGHT":
   - FIRST read the RIGHT side (the result the student wrote) — before you compute anything yourself.
@@ -372,6 +383,7 @@ Output JSON only:
       "studentAnswer": "<exact handwriting transcription, student's numeral system, steps joined by ' | ', WITHOUT the question number>",
       "studentFinalResult": "<the student's final result only, same numeral system>",
       "numeralSystem": "arabic or western",
+      "unreadable": false,
       "verdict": "correct | partial | wrong",
       "correctnessRatio": <number from 0 to 1>,
       "feedback": "<Arabic: compare the student's final value to the correct one, and briefly say what was right and what was wrong, e.g. 'الناتج النهائي للطالب ٤١ والصحيح ١٣ لأن ١٤ يجب أن تُطرح عند النقل؛ الخطوة الأولى سليمة.'>",
@@ -451,6 +463,17 @@ Output JSON only:
         else feedback = 'اجابة صحيحة جزئياً.';
       }
 
+      // ── Copy-detection: if the transcribed answer is almost identical to the
+      // model answer, the AI likely copied the model instead of reading the
+      // student's messy ink. Flag it for manual review.
+      const modelAns = q?.answer || '';
+      if (modelAns && looksCopiedFromModel(studentAnswer, modelAns)) {
+        feedback = '\u26A0\uFE0F تحذير: قد يكون استخراج اجابة الطالب غير دقيق (تشبه الاجابة النموذجية كثيراً). يُرجى المراجعة اليدوية. ' + feedback;
+      }
+      if (g.unreadable === true) {
+        feedback = '\u26A0\uFE0F خط الطالب غير واضح للقراءة الالية، يُرجى المراجعة اليدوية. ' + feedback;
+      }
+
       return {
         questionId: g.questionId,
         studentAnswer,
@@ -478,6 +501,36 @@ Output JSON only:
   }
 }
 
+
+// Detect whether the transcribed student answer was likely COPIED from the
+// model answer (a known AI failure mode when handwriting is messy). We compare
+// after normalizing digits, spaces and operators. If they are essentially the
+// same string, it is suspicious and worth a manual-review flag.
+function looksCopiedFromModel(studentAnswer: string, modelAnswer: string): boolean {
+  const norm = (s: string) => {
+    const map: Record<string, string> = {
+      '\u0660':'0','\u0661':'1','\u0662':'2','\u0663':'3','\u0664':'4',
+      '\u0665':'5','\u0666':'6','\u0667':'7','\u0668':'8','\u0669':'9'
+    };
+    return s
+      .replace(/[\u0660-\u0669]/g, d => map[d] || d)
+      .replace(/[\u00D7]/g, '*').replace(/[\u00F7]/g, '/').replace(/[\u2212]/g, '-')
+      .replace(/[\s|]/g, '')           // drop spaces and the " | " separators
+      .replace(/["'.]/g, '')            // drop quotes/periods
+      .toLowerCase();
+  };
+  const a = norm(studentAnswer);
+  const b = norm(modelAnswer);
+  if (!a || !b) return false;
+  if (a.length < 4) return false;        // too short to judge
+  // Exact match after normalization, or one fully contains the other and they
+  // are nearly the same length → very likely a copy.
+  if (a === b) return true;
+  const longer = a.length >= b.length ? a : b;
+  const shorter = a.length >= b.length ? b : a;
+  if (longer.includes(shorter) && shorter.length / longer.length > 0.9) return true;
+  return false;
+}
 
 async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
   return new Promise((resolve, reject) => {
