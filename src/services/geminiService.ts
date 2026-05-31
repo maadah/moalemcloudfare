@@ -398,26 +398,19 @@ RULE 9 — WORD PROBLEMS & MULTI-PART: read what the question asks for. For mult
 
 RULE 10 — EQUIVALENT FORMS ARE ACCEPTED (method is free): different but valid methods, or equivalent forms (١/٢ = ٠٫٥ = ٥٠٪, or ٣٤-٦ reached directly vs via ١٧×٢-٦), are CORRECT as long as the FINAL value equals the model's final value. Do not punish a student for solving differently than the model.
 
-PART C — FINAL RESULT FIRST, THEN ESTIMATE HOW MUCH IS CORRECT:
-  STEP 1 — Identify the correct FINAL value from the printed MODEL ANSWER (it is typed and reliable).
-  STEP 2 — Read the student's FINAL result and turn BOTH into words to compare their VALUE
-           (not their surface text). Accept equivalent forms (e.g. ١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢).
-           Ignore unit symbols (م²، سم³) when comparing the number.
-             - same value  → the student's answer is CORRECT.
-             - different    → the student's answer is WRONG overall (even if some inner lines were
-                              self-consistent — e.g. the sign-transfer error in RULE 3).
-  STEP 3 — ESTIMATE "correctnessRatio" (a number from 0 to 1) = how much of the required solution
-           the student got right:
-             - final value correct                              → 1.0
-             - final value wrong, but most of the work is sound
-               and only a small slip occurred                   → high, e.g. 0.7–0.9
-             - about half the work/parts correct                → ~0.5
-             - only a little correct                            → low, e.g. 0.2–0.3
-             - completely wrong, or wrong from the very start,
-               or blank, or only copied the question            → 0.0
-           For a multi-part question, base the ratio on how many required parts are correct.
-  STEP 4 — Also give a coarse "verdict": "correct" (ratio = 1), "partial" (0 < ratio < 1),
-           or "wrong" (ratio = 0). The numeric grade will be computed from correctnessRatio.
+PART C — THE VERDICT IS BASED ON THE FINAL RESULT vs THE MODEL ANSWER (simple and stable):
+  STEP 1 — Find the correct FINAL value from the printed MODEL ANSWER (it is typed and reliable).
+  STEP 2 — Read the student's FINAL result (their last value after "="). Turn BOTH the student's
+           final value and the model's final value into words and compare their VALUE — not their
+           surface text. Accept equivalent forms (١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢). Ignore unit symbols
+           (م²، سم³) when comparing the number.
+  STEP 3 — Set the verdict ONLY from this comparison:
+             - same value      → "correct"
+             - different value  → "wrong"
+             - blank / nothing written / only the question copied → "wrong"
+           Do NOT analyze every intermediate line. The final value vs the model is what decides.
+           The earlier RULES (signs, order of operations, fractions, transfer) are there to help you
+           understand the work, but the DECISION is: does the final value match the model or not.
 
   NEVER overwrite the student's writing with the model answer. The model answer is ONLY a
   reference for the correct final value.
@@ -435,9 +428,8 @@ Output JSON only:
       "studentFinalResult": "<the student's final result only, same numeral system>",
       "numeralSystem": "arabic or western",
       "unreadable": false,
-      "verdict": "correct | partial | wrong",
-      "correctnessRatio": <number from 0 to 1>,
-      "feedback": "<Arabic: compare the student's final value to the correct one, and briefly say what was right and what was wrong, e.g. 'الناتج النهائي للطالب ٤١ والصحيح ١٣ لأن ١٤ يجب أن تُطرح عند النقل؛ الخطوة الأولى سليمة.'>",
+      "verdict": "correct | wrong",
+      "feedback": "<Arabic: state the student's final value and the correct final value, e.g. 'الناتج النهائي للطالب ٤١ والصحيح ١٣'>",
       "box": [ymin, xmin, ymax, xmax],
       "pageIndex": <0-based>
     }
@@ -485,44 +477,32 @@ Output JSON only:
       studentAnswer = stripMarker(studentAnswer);
       if (g.studentFinalResult) g.studentFinalResult = stripMarker(g.studentFinalResult);
 
-      // ── Grade from the AI's correctnessRatio (0..1) ──────────────────────
-      // The model compares the student's FINAL result to the model answer and
-      // estimates how much of the solution is correct. Grade = max × ratio,
-      // rounded to the nearest WHOLE number. A completely wrong/blank answer
-      // has ratio 0 → grade 0.
+      // ── Grade by comparing the FINAL result to the model answer ──────────
+      // Simple and stable: the AI returns a verdict based only on whether the
+      // student's FINAL result equals the model's FINAL result.
+      //   correct → full marks
+      //   wrong   → zero
+      // No step-by-step ratio (that caused instability with fractions and
+      // order-of-operations). Free-text questions fall back to the AI grade.
       const verdict = String(g.verdict || '').toLowerCase();
 
-      // Determine the ratio. Prefer the AI's numeric correctnessRatio; if it is
-      // missing, fall back to the coarse verdict (correct=1, wrong=0, partial=0.5).
-      let ratio: number;
-      if (typeof g.correctnessRatio === 'number' && isFinite(g.correctnessRatio)) {
-        ratio = Math.max(0, Math.min(1, g.correctnessRatio));
-      } else if (verdict === 'correct') {
-        ratio = 1;
-      } else if (verdict === 'wrong') {
-        ratio = 0;
-      } else if (verdict === 'partial') {
-        ratio = 0.5;
-      } else {
-        // No info at all (e.g. free-text). Use AI-provided grade if any, else full.
-        ratio = -1; // sentinel: use g.grade
-      }
-
       let grade: number;
-      if (ratio < 0) {
-        grade = (typeof g.grade === 'number') ? g.grade : maxGrade;
+      if (verdict === 'correct') {
+        grade = maxGrade;
+      } else if (verdict === 'wrong') {
+        grade = 0;
       } else {
-        // No fractions: round to the nearest whole number.
-        grade = Math.round(maxGrade * ratio);
+        // No clear verdict (e.g. free-text essay). Use AI-provided grade if any.
+        grade = (typeof g.grade === 'number') ? g.grade : maxGrade;
       }
       // Safety clamp
       grade = Math.max(0, Math.min(maxGrade, grade));
 
       let feedback = g.feedback || '';
       if (!feedback) {
-        if (ratio >= 1) feedback = 'اجابة صحيحة.';
-        else if (ratio <= 0) feedback = 'اجابة خاطئة.';
-        else feedback = 'اجابة صحيحة جزئياً.';
+        if (verdict === 'correct') feedback = 'اجابة صحيحة.';
+        else if (verdict === 'wrong') feedback = 'اجابة خاطئة.';
+        else feedback = '';
       }
 
       // ── Copy-detection (two layers) ─────────────────────────────────────
