@@ -311,22 +311,18 @@ PART A — TRANSCRIBE (copy the ink, do not solve):
    Do not confuse this with the question number or with a measurement unit (e.g. م², سم³).
 6. Report "numeralSystem": "arabic" or "western".
 
-7. READING FRACTIONS CORRECTLY (critical — do NOT flip them):
-   A fraction is written with the NUMERATOR on TOP and the DENOMINATOR on the BOTTOM, separated by
-   a horizontal bar. Transcribe it as "top/bottom" — top number first, bottom number second.
-   - "٣ over ٤" (٣ on top, ٤ below) → "٣/٤". Do NOT write it as "٤/٣".
-   - NEVER swap numerator and denominator. NEVER turn a fraction into its reciprocal while reading.
-   - If a multiplication of fractions is written (e.g. ٣/٤ × ١/٢ × ٤/٧), copy each fraction EXACTLY
-     as it sits on the paper (top/bottom), keeping every × as multiplication. Do not invent a
-     division or a reciprocal that the student did not write.
-   - Read the TOP row of all fractions first to be sure which digits are numerators, then the
-     bottom row for denominators, before writing them as top/bottom.
+7. FRACTIONS: copy each fraction exactly as written — numerator on top, denominator on the bottom.
+   Keep the student's operators (× stays ×, ÷ stays ÷). Do not flip a fraction and do not change a
+   multiplication into a reciprocal unless the student actually wrote ÷.
 
-8. READING MULTI-DIGIT NUMBERS (do NOT flip the digits):
-   Read every number with ALL its digits in their natural order. ٢١ means twenty-one and stays ٢١
-   — never read it as ١٢. Although Arabic text flows right-to-left, the DIGITS inside a number keep
-   their normal place value (tens then units, e.g. ٢١ = واحد وعشرون). Capture all digits of the
-   final result and do not let a digit merge with an adjacent fraction, arrow (⟸/⟹), or symbol.
+8. MULTI-DIGIT NUMBERS: copy every number with all its digits in their written order; do not drop a
+   digit or merge it with an adjacent symbol.
+
+9. EMPTY / UNANSWERED QUESTIONS (very important):
+   If the student wrote NOTHING for a question (no handwritten ink in its answer area), you MUST set
+   studentAnswer to "" (empty), studentFinalResult to "", and verdict to "wrong". NEVER write a
+   solution, NEVER solve it yourself, and NEVER copy the model answer for a blank question. An empty
+   answer earns zero. Inventing or solving an answer the student did not write is a serious error.
 
 *** ANTI-COPY WARNING (very important) ***
   The MODEL ANSWER is printed in the data above. You must NEVER copy it into studentAnswer.
@@ -379,17 +375,10 @@ RULE 3 — SOLVING EQUATIONS (a variable س/ص/ع/x with "="): moving a term acr
   Example: "س + ١٤ = ٢٧" → correct "س = ٢٧ - ١٤ = ١٣"; if student wrote "س = ٢٧ + ١٤ = ٤١" the
   arithmetic ٢٧+١٤=٤١ is true on its own but the transfer was wrong → WRONG (model says ١٣).
 
-RULE 4 — FRACTIONS:
-  - FIRST make sure you READ each fraction correctly (top = numerator, bottom = denominator).
-    Many false errors come from the READER flipping a fraction, not from the student. If your
-    reading would make the student's answer look like "multiplying reciprocals", double-check that
-    you did not flip the fractions yourself. Trust the ink: top/bottom as written.
-  - addition/subtraction needs a common denominator; "١/٢ + ١/٣ = ٢/٥" is WRONG (correct ٥/٦).
-  - multiplication multiplies numerators and denominators; division multiplies by the reciprocal.
-  - For a product like "٣/٤ × ١/٢ × ٤/٧": numerator = ٣×١×٤ = ١٢, denominator = ٤×٢×٧ = ٥٦,
-    so ١٢/٥٦ = ٣/١٤ after simplifying. Only treat a fraction as flipped if the student ACTUALLY
-    wrote a division sign (÷) — never assume reciprocals on your own.
-  - a fraction should be checked in lowest terms if the model is reduced (e.g. ٢/٤ = ١/٢).
+RULE 4 — FRACTIONS: read each fraction as written (top/bottom) and trust the ink — most "reciprocal"
+  errors come from the reader flipping a fraction, not the student. Add/subtract needs a common
+  denominator; multiply across numerators and denominators; compare in lowest terms when the model is
+  reduced. Only treat a fraction as a reciprocal if the student actually wrote ÷.
 
 RULE 5 — EXPONENTS & ROOTS: "أُس" means repeated multiplication (٢³ = ٢×٢×٢ = ٨, not ٢×٣=٦).
   Square root: "هل الجذر صحيح؟" √٩ = ٣ because ٣×٣ = ٩.
@@ -492,8 +481,15 @@ Output JSON only:
       // order-of-operations). Free-text questions fall back to the AI grade.
       const verdict = String(g.verdict || '').toLowerCase();
 
+      // Safety net: a blank/empty student answer ALWAYS scores 0, no matter
+      // what verdict or grade the AI returned. This prevents the AI from
+      // inventing or copying a solution for a question the student left empty.
+      const isBlank = !studentAnswer || !studentAnswer.replace(/[\s?]/g, '').trim() || /^BLANK$/i.test(studentAnswer.trim());
+
       let grade: number;
-      if (verdict === 'correct') {
+      if (isBlank) {
+        grade = 0;
+      } else if (verdict === 'correct') {
         grade = maxGrade;
       } else if (verdict === 'wrong') {
         grade = 0;
@@ -505,7 +501,9 @@ Output JSON only:
       grade = Math.max(0, Math.min(maxGrade, grade));
 
       let feedback = g.feedback || '';
-      if (!feedback) {
+      if (isBlank && !feedback) {
+        feedback = 'لم يجب الطالب على هذا السؤال.';
+      } else if (!feedback) {
         if (verdict === 'correct') feedback = 'اجابة صحيحة.';
         else if (verdict === 'wrong') feedback = 'اجابة خاطئة.';
         else feedback = '';
