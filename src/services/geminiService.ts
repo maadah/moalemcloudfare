@@ -393,19 +393,32 @@ RULE 9 — WORD PROBLEMS & MULTI-PART: read what the question asks for. For mult
 
 RULE 10 — EQUIVALENT FORMS ARE ACCEPTED (method is free): different but valid methods, or equivalent forms (١/٢ = ٠٫٥ = ٥٠٪, or ٣٤-٦ reached directly vs via ١٧×٢-٦), are CORRECT as long as the FINAL value equals the model's final value. Do not punish a student for solving differently than the model.
 
-PART C — THE VERDICT IS BASED ON THE FINAL RESULT vs THE MODEL ANSWER (simple and stable):
-  STEP 1 — Find the correct FINAL value from the printed MODEL ANSWER (it is typed and reliable).
-  STEP 2 — Read the student's FINAL result (their last value after "="). Turn BOTH the student's
-           final value and the model's final value into words and compare their VALUE — not their
-           surface text. Accept equivalent forms (١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢). Ignore unit symbols
-           (م²، سم³) when comparing the number.
-  STEP 3 — Set the verdict ONLY from this comparison:
-             - same value      → "correct"
-             - different value  → "wrong"
-             - blank / nothing written / only the question copied → "wrong"
-           Do NOT analyze every intermediate line. The final value vs the model is what decides.
-           The earlier RULES (signs, order of operations, fractions, transfer) are there to help you
-           understand the work, but the DECISION is: does the final value match the model or not.
+PART C — THINK SLOWLY AND VERIFY THE FINAL RESULT BEFORE DECIDING (accuracy over speed):
+  Do NOT rush to a verdict. For each question, reason through these steps carefully, one at a time:
+
+  STEP 1 — LOCATE the student's final result.
+           The student writes the final answer at the END of their last line (after the last "=").
+           Point to that exact value. Ignore the intermediate working — only the final value matters.
+
+  STEP 2 — READ the student's final value digit by digit, then SAY IT IN WORDS to be sure.
+           e.g. if you see ٢١, read "٢ ثم ١" → "واحد وعشرون" = 21. If you see ٢, it is "اثنان" = 2.
+           This spoken-words check prevents misreading or dropping a digit. Capture the whole number.
+
+  STEP 3 — READ the model answer's final value the same way, in words.
+
+  STEP 4 — COMPARE the two values (not their surface text). Accept equivalent forms
+           (١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢). Ignore unit symbols (م²، سم³) when comparing the number.
+
+  STEP 5 — DECIDE the verdict ONLY from STEP 4:
+             - same value                                   → "correct"
+             - different value                              → "wrong"
+             - blank / nothing written / only question copied → "wrong"
+           Do NOT analyze every intermediate line — that causes inconsistency. The single decision is:
+           does the student's FINAL value equal the model's FINAL value?
+           The earlier RULES exist only to help you understand the work, not to drive the verdict.
+
+  Take your time on STEP 1 and STEP 2 — most mistakes come from misreading the final value or
+  picking the wrong line. Be deliberate and consistent: the same paper must always give the same result.
 
   NEVER overwrite the student's writing with the model answer. The model answer is ONLY a
   reference for the correct final value.
