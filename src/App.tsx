@@ -1,4 +1,4 @@
-
+ 
 // Smart Grader - AI Powered Exam System (Netlify Optimized)
 import React, { useState, useEffect, useRef } from 'react';
 import { 
@@ -2300,4 +2300,1730 @@ function ExamCreator({ user, userProfile, initialData, onSave, onCancel }: any) 
                       <p className="font-bold mb-1 underline">الإجابة النموذجية:</p>
                       {q.answer && <p className="whitespace-pre-wrap">{q.answer}</p>}
                       {q.answerImage && <img src={q.answerImage} className="mt-2 max-h-64 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
- 
+                    </div>
+                  )}
+
+                  <div className="mr-6 space-y-4">
+                    {q.subQuestions?.map((sq, sqIdx) => (
+                      <div key={sq.id} className="space-y-4">
+                        <div className="flex justify-between">
+                          <p className="font-medium leading-relaxed">
+                            {q.subStyle === 'letters' ? `${String.fromCharCode(1571 + sqIdx)}- ` : `${sqIdx + 1}- `}
+                            {cleanQuestionText(sq.text)}
+                          </p>
+                          <span className="text-sm">({formatGrade(sq.grade)} درجة)</span>
+                        </div>
+                        {sq.questionImage && <img src={sq.questionImage} className="max-h-48 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
+                        
+                        {(sq.answer || sq.answerImage) && (
+                          <div className="text-sm text-stone-500 border-r-2 border-stone-100 pr-3 mr-2 mb-4">
+                            <span className="font-bold">الجواب: </span>
+                            {sq.answer && <span>{sq.answer}</span>}
+                            {sq.answerImage && <img src={sq.answerImage} className="mt-1 max-h-48 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
+                          </div>
+                        )}
+                        
+                        <div className="mr-6 space-y-4">
+                          {sq.subQuestions?.map((ssq, ssqIdx) => (
+                            <div key={ssq.id} className="space-y-2">
+                              <div className="flex justify-between text-sm">
+                                <p className="leading-relaxed">{ssqIdx + 1}- {cleanQuestionText(ssq.text)}</p>
+                                <span>({formatGrade(ssq.grade)} درجة)</span>
+                              </div>
+                              {(ssq.answer || ssq.answerImage) && (
+                                <div className="text-xs text-stone-500 border-r-2 border-stone-100 pr-3 mr-2">
+                                  <span className="font-bold">الجواب: </span>
+                                  {ssq.answer && <span>{ssq.answer}</span>}
+                                  {ssq.answerImage && <img src={ssq.answerImage} className="mt-1 max-h-32 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Full Exam Preview for PDF (Questions & Answers) */}
+        <div className="fixed left-[-9999px] top-0 w-[210mm] pdf-export-container" ref={examFullPrintRef}>
+          <div className="px-[20mm] py-[25mm] bg-white space-y-8 text-right" dir="rtl" style={{ boxSizing: 'border-box' }}>
+            <h2 className="text-3xl font-bold text-center border-b-4 border-stone-900 pb-4">نموذج الأسئلة والأجوبة النموذجية</h2>
+            <div className="grid grid-cols-2 gap-4 text-lg border-b pb-4">
+              <p><span className="font-bold">المادة:</span> {title}</p>
+              <p><span className="font-bold">الدراسة:</span> {study}</p>
+              <p><span className="font-bold">الدور:</span> {round}</p>
+              <p><span className="font-bold">السنة الدراسية:</span> {new Date().getFullYear()} - {new Date().getFullYear() + 1}</p>
+              <p><span className="font-bold">الدرجة الكلية:</span> {totalGrade}</p>
+              <p><span className="font-bold">الوقت:</span> {duration}</p>
+            </div>
+
+            <div className="space-y-12">
+              {questions.map((q, idx) => (
+                <div key={q.id} className="p-6 border-2 border-stone-200 rounded-2xl space-y-6">
+                  <div className="flex justify-between items-center bg-stone-50 p-3 rounded-xl">
+                    <h4 className="text-xl font-bold leading-relaxed">س{idx + 1}: {cleanQuestionText(q.text)}</h4>
+                    <span className="bg-stone-900 text-white px-4 py-1 rounded-full text-sm">{formatGrade(q.grade)} درجة</span>
+                  </div>
+                  
+                  {(q.answer || q.answerImage) && (
+                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                      <p className="text-emerald-800 font-bold mb-2">الإجابة النموذجية:</p>
+                      {q.answer && <p className="whitespace-pre-wrap">{q.answer}</p>}
+                      {q.answerImage && <img src={q.answerImage} className="mt-4 max-h-64 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
+                    </div>
+                  )}
+
+                  <div className="mr-6 space-y-6">
+                    {q.subQuestions?.map((sq, sqIdx) => (
+                      <div key={sq.id} className="space-y-6 border-r-2 border-stone-100 pr-4">
+                        <div className="flex justify-between font-bold">
+                          <p className="leading-relaxed">{q.subStyle === 'letters' ? `${String.fromCharCode(1571 + sqIdx)}- ` : `${sqIdx + 1}- `} {cleanQuestionText(sq.text)}</p>
+                          <span>{sq.grade} درجة</span>
+                        </div>
+                        {sq.answer && (
+                          <div className="bg-stone-50 p-3 rounded-lg border border-stone-200 text-sm">
+                            <p className="font-bold text-stone-500 mb-1">الجواب:</p>
+                            <p className="whitespace-pre-wrap">{sq.answer}</p>
+                            {sq.answerImage && <img src={sq.answerImage} className="mt-2 max-h-48 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
+                          </div>
+                        )}
+                        {sq.subQuestions && sq.subQuestions.length > 0 && (
+                          <div className="mr-6 space-y-4">
+                            {sq.subQuestions.map((ssq, ssqIdx) => (
+                              <div key={ssq.id} className="space-y-2 border-r border-stone-100 pr-4">
+                                <div className="flex justify-between font-bold text-sm">
+                                  <p className="leading-relaxed">{ssqIdx + 1}- {cleanQuestionText(ssq.text)}</p>
+                                  <span>{ssq.grade} درجة</span>
+                                </div>
+                                {ssq.answer && (
+                                  <div className="bg-white p-2 rounded border border-stone-100 text-xs">
+                                    <p className="font-bold text-stone-400 mb-1">الجواب:</p>
+                                    <p className="whitespace-pre-wrap">{ssq.answer}</p>
+                                    {ssq.answerImage && <img src={ssq.answerImage} className="mt-1 max-h-32 object-contain rounded-lg" referrerPolicy="no-referrer" crossOrigin="anonymous" />}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {(extractionMode === 'manual' || questions.length > 0) && (
+          <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-stone-100 pt-6" data-html2canvas-ignore>
+              <h3 className="text-xl font-bold">الأسئلة</h3>
+              {(extractionMode === 'manual' || !questions.some(q => q.answer)) && (
+                <button 
+                  onClick={addQuestion}
+                  className="text-emerald-600 flex items-center gap-1 text-sm font-bold hover:underline"
+                >
+                  <Plus className="w-4 h-4" /> إضافة سؤال
+                </button>
+              )}
+            </div>
+            
+            <div className="space-y-4">
+              {questions.map((q, index) => (
+              <div key={q.id} className="p-2 sm:p-6 bg-stone-50 rounded-2xl border border-stone-200 space-y-3 relative group">
+                <button 
+                  onClick={() => removeQuestion(q.id)}
+                  className="absolute top-2 left-2 sm:top-4 sm:left-4 p-1.5 sm:p-2 text-red-500 sm:text-stone-300 hover:text-red-500 hover:bg-red-50 bg-white sm:bg-transparent shadow-sm sm:shadow-none border border-red-100 sm:border-none rounded-xl opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all z-10"
+                  title="حذف هذا السؤال بالكامل"
+                >
+                  <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
+                </button>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 md:gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 h-8 bg-white rounded-lg flex items-center justify-center font-bold text-stone-400 border border-stone-200 shrink-0">{index + 1}</span>
+                    {/* Status Indicators - more polished */}
+                    <div className="flex items-center gap-2">
+                       {(q.questionImage || q.answerImage) && (
+                         <div className="flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full border border-emerald-200 text-[10px] font-bold shadow-sm">
+                           <ImageIcon className="w-3 h-3" /> مرفق صور
+                         </div>
+                       )}
+                       {(q.subQuestions?.length || 0) > 0 && (
+                         <div className="flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full border border-blue-200 text-[10px] font-bold shadow-sm">
+                           <Layers className="w-3 h-3" /> نظام {q.subStyle === 'letters' ? 'فروع' : 'نقاط'}
+                         </div>
+                       )}
+                    </div>
+                  </div>
+                  <div className="hidden sm:block flex-1" />
+                  <div className="flex items-center justify-between sm:justify-end gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-stone-400">الدرجة:</span>
+                      <input 
+                        type="number" 
+                        value={q.grade} 
+                        onChange={(e) => updateQuestion(q.id, { grade: Number(e.target.value) })}
+                        className="w-16 px-2 py-1 rounded-lg border border-stone-200 text-sm text-center"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <textarea 
+                  value={q.text} 
+                  onChange={(e) => {
+                    updateQuestion(q.id, { text: e.target.value });
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
+                  placeholder="نص السؤال الرئيسي..."
+                  rows={1}
+                  className="w-full bg-white px-4 py-2 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-emerald-500 overflow-hidden resize-none"
+                />
+
+                {/* Quick Add Menu */}
+                <div className="space-y-2 py-1" data-html2canvas-ignore>
+                  {(!q.subQuestions?.length && !q.questionImage && !q.answerImage) && (
+                    <p className="text-[10px] font-bold text-stone-400 mb-1">بإمكانك إضافة صورة أو فروع أو نقاط إذا كان السؤال الرئيسي يحتوي على ذلك:</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!q.subQuestions?.length && !q.questionImage && !q.answerImage && (
+                      <button 
+                        onClick={() => updateQuestion(q.id, { questionImage: '' })}
+                        className="text-[10px] text-stone-500 hover:text-emerald-600 flex items-center gap-1 bg-white border border-stone-100 px-3 py-1.5 rounded-lg transition-all shadow-sm"
+                      >
+                        <ImageIcon className="w-3 h-3 text-emerald-500" /> إضافة صور للسؤال
+                      </button>
+                    )}
+                  {(!q.subQuestions || q.subQuestions.length === 0) && (
+                    <>
+                      <button 
+                        onClick={() => addSubQuestion(q.id, undefined, 'letters')}
+                        className="text-[10px] text-stone-500 hover:text-emerald-600 flex items-center gap-1 bg-white border border-stone-100 px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        <Layers className="w-3 h-3" /> إضافة فروع (أ، ب، ج)
+                      </button>
+                      <button 
+                        onClick={() => addSubQuestion(q.id, undefined, 'numbers')}
+                        className="text-[10px] text-stone-500 hover:text-emerald-600 flex items-center gap-1 bg-white border border-stone-100 px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        <Plus className="w-3 h-3" /> إضافة نقاط (1، 2، 3)
+                      </button>
+                    </>
+                  )}
+                  {(q.subQuestions?.length || 0) > 0 && (
+                    <div className="flex flex-wrap items-center gap-3 w-full border-b border-stone-100 pb-3">
+                      <div className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-bold flex items-center gap-2 flex-1">
+                        <Layers className="w-3.5 h-3.5" />
+                        نظام المكونات مفعل: بإمكانك إضافة الصور والإجابات لكل {q.subStyle === 'letters' ? 'فرع' : 'نقطة'} بالأسفل.
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => addSubQuestion(q.id, undefined, q.subStyle || 'letters')}
+                          className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-all flex items-center gap-1.5 text-[10px] font-bold"
+                          title={q.subStyle === 'letters' ? "إضافة فرع جديد" : "إضافة نقطة جديدة"}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          إضافة {q.subStyle === 'letters' ? 'فرع' : 'نقطة'} جديد
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+                {(!q.subQuestions || q.subQuestions.length === 0) && (q.questionImage !== undefined || q.answerImage !== undefined || q.questionImage || q.answerImage) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in duration-300">
+                    <ImageUpload 
+                      label="صورة السؤال" 
+                      value={q.questionImage} 
+                      onChange={(base64) => updateQuestion(q.id, { questionImage: base64 })}
+                      onRemove={() => updateQuestion(q.id, { questionImage: undefined })}
+                    />
+                    <ImageUpload 
+                      label="صورة الجواب" 
+                      value={q.answerImage} 
+                      onChange={(base64) => updateQuestion(q.id, { answerImage: base64 })}
+                      onRemove={() => updateQuestion(q.id, { answerImage: undefined })}
+                    />
+                  </div>
+                )}
+                
+                {/* Sub-questions Section */}
+                {(q.subQuestions?.length || 0) > 0 && (
+                <div className="mr-0 sm:mr-4 md:mr-8 space-y-2.5 border-r-2 border-emerald-100 pr-1.5 sm:pr-3 md:pr-4 animate-in slide-in-from-right duration-300">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-bold text-stone-400">
+                        {q.subStyle === 'letters' ? 'الفروع والترك:' : 'النقاط/الفراغات والترك:'}
+                      </span>
+                      <div className="flex items-center bg-stone-100 rounded-lg p-0.5">
+                        <button 
+                          onClick={() => updateQuestion(q.id, { subStyle: 'numbers' })}
+                          className={cn(
+                            "px-2 py-0.5 text-[8px] rounded-md transition-all",
+                            (q.subStyle === 'numbers' || !q.subStyle) ? "bg-white text-emerald-600 shadow-sm" : "text-stone-400"
+                          )}
+                        >
+                          1, 2, 3
+                        </button>
+                        <button 
+                          onClick={() => updateQuestion(q.id, { subStyle: 'letters' })}
+                          className={cn(
+                            "px-2 py-0.5 text-[8px] rounded-md transition-all",
+                            q.subStyle === 'letters' ? "bg-white text-emerald-600 shadow-sm" : "text-stone-400"
+                          )}
+                        >
+                          أ, ب, ج
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-stone-400">
+                        {q.subStyle === 'letters' ? 'عدد الفروع المطلوب حلها:' : 'عدد النقاط المطلوب حلها:'}
+                      </span>
+                      <input 
+                        type="number" 
+                        value={q.requiredSubCount || ''} 
+                        onChange={(e) => updateQuestion(q.id, { requiredSubCount: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder={q.subQuestions?.length.toString()}
+                        className="w-10 px-1 py-0.5 rounded border border-stone-200 text-[10px] text-center"
+                      />
+                    </div>
+                  </div>
+                  {q.subQuestions?.map((sq, sqIndex) => (
+                    <div key={sq.id} className="p-1.5 sm:p-4 bg-blue-50/30 rounded-xl border border-blue-100 space-y-2.5 relative group/sub shadow-sm transition-all hover:bg-blue-50/50">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-blue-600 shrink-0">
+                            {q.subStyle === 'letters' ? `(${ARABIC_BRANCH_LETTERS[sqIndex % ARABIC_BRANCH_LETTERS.length]})` : `${sqIndex + 1}-`}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {(sq.questionImage || sq.answerImage) && (
+                              <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-md border border-emerald-200 text-[8px] font-bold shadow-sm">
+                                <ImageIcon className="w-2 h-2" /> مرفق صور
+                              </div>
+                            )}
+                            {(sq.subQuestions?.length || 0) > 0 && (
+                              <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-md border border-blue-200 text-[8px] font-bold shadow-sm">
+                                <Layers className="w-2 h-2" /> يضم نقاط
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-1 gap-2">
+                          <textarea 
+                            value={sq.text} 
+                            onChange={(e) => {
+                              updateQuestion(sq.id, { text: e.target.value }, q.id);
+                              e.target.style.height = 'auto';
+                              e.target.style.height = e.target.scrollHeight + 'px';
+                            }}
+                            onFocus={(e) => {
+                              e.target.style.height = 'auto';
+                              e.target.style.height = e.target.scrollHeight + 'px';
+                            }}
+                            placeholder="نص السؤال الفرعي..."
+                            rows={1}
+                            className="flex-1 bg-white px-3 py-1.5 rounded-lg border border-blue-200 text-sm outline-none focus:ring-2 focus:ring-blue-500 overflow-hidden resize-none placeholder:text-stone-400"
+                          />
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative">
+                          <button 
+                            onClick={() => removeQuestion(sq.id, q.id)}
+                            className="absolute -left-2 -top-2 sm:-left-10 md:-left-12 sm:top-1/2 sm:-translate-y-1/2 p-1.5 sm:p-2 text-red-500 sm:text-stone-300 hover:text-red-600 hover:bg-red-50 bg-white sm:bg-transparent shadow-sm sm:shadow-none border border-red-100 sm:border-none rounded-xl opacity-100 sm:opacity-0 group-hover/sub:opacity-100 transition-all z-10"
+                            title={q.subStyle === 'letters' ? "حذف هذا الفرع" : "حذف هذه النقطة"}
+                          >
+                            <Trash2 className="w-4 h-4 sm:w-5 sm:h-5 md:w-4 md:h-4" />
+                          </button>
+                          <div className="flex flex-col gap-1">
+                            {(!sq.subQuestions?.length && !sq.questionImage && q.subStyle === 'letters') && (
+                              <p className="text-[9px] font-bold text-stone-400">بإمكانك إضافة صورة أو نقاط لهذا الفرع:</p>
+                            )}
+                            <div className="flex items-center gap-2">
+                              <ImageUpload 
+                                label="صورة" 
+                                value={sq.questionImage} 
+                                onChange={(base64) => updateQuestion(sq.id, { questionImage: base64 }, q.id)}
+                                onRemove={() => updateQuestion(sq.id, { questionImage: undefined }, q.id)}
+                                compact
+                              />
+                              {!sq.subQuestions?.length && q.subStyle === 'letters' && (
+                                <button 
+                                  onClick={() => addSubQuestion(q.id, sq.id, 'numbers')}
+                                  className="text-[9px] text-blue-600 hover:text-blue-700 flex items-center gap-1 bg-white border border-blue-100 px-2 py-1 rounded-md transition-all shadow-sm"
+                                  title="بدء إضافة نقاط داخل هذا الفرع"
+                                >
+                                  <Plus className="w-2.5 h-2.5" /> إضافة نقاط
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-stone-400">الدرجة:</span>
+                            <input 
+                              type="number" 
+                              value={sq.grade} 
+                              onChange={(e) => updateQuestion(sq.id, { grade: Number(e.target.value) }, q.id)}
+                              className="w-12 px-1 py-0.5 rounded-md border border-stone-200 text-xs text-center"
+                            />
+                          </div>
+                            
+                        </div>
+                      </div>
+
+                      {/* Level 3: Points inside a Branch */}
+                      <div className="mr-0 sm:mr-4 md:mr-6 space-y-2 border-r-2 border-blue-200 pr-1 sm:pr-3">
+                        {sq.subQuestions && sq.subQuestions.length > 0 && (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                            <span className="text-[9px] font-bold text-blue-500">النقاط داخل هذا الفرع:</span>
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] text-stone-400">المطلوب حلها:</span>
+                                <input 
+                                  type="number" 
+                                  value={sq.requiredSubCount || ''} 
+                                  onChange={(e) => updateQuestion(sq.id, { requiredSubCount: e.target.value ? Number(e.target.value) : undefined }, q.id)}
+                                  placeholder={sq.subQuestions?.length.toString()}
+                                  className="w-8 px-1 py-0.5 rounded border border-blue-200 text-[9px] text-center"
+                                />
+                              </div>
+                              <button 
+                                onClick={() => addSubQuestion(q.id, sq.id, 'numbers')}
+                                className="text-[9px] text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-white border border-emerald-100 px-2.5 py-1 rounded-md transition-all shadow-sm"
+                              >
+                                <Plus className="w-2.5 h-2.5" /> إضافة نقطة جديدة
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {sq.subQuestions?.map((ssq, ssqIndex) => (
+                          <div key={ssq.id} className="relative group/point animate-in slide-in-from-right-2 duration-300">
+                            <button 
+                              onClick={() => removeQuestion(ssq.id, q.id, sq.id)}
+                              className="absolute -left-2 -top-2 sm:-left-10 sm:top-1/2 sm:-translate-y-1/2 p-1.5 sm:p-2 text-red-500 sm:text-stone-300 hover:text-red-600 hover:bg-red-50 bg-white sm:bg-transparent shadow-md sm:shadow-none border border-red-100 sm:border-none rounded-lg opacity-100 sm:opacity-0 group-hover/point:opacity-100 transition-all z-10"
+                              title="حذف هذه النقطة"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-3.5 md:h-3.5" />
+                            </button>
+                            <div className="flex flex-col gap-1.5 bg-emerald-50/20 p-1.5 sm:p-3 rounded-lg border border-emerald-100 shadow-sm transition-all hover:bg-emerald-50/40">
+                              <div className="flex items-start gap-2">
+                                <span className="text-[10px] font-bold text-emerald-600 mt-1 shrink-0">{ssqIndex + 1}-</span>
+                                <div className="flex-1 space-y-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <textarea 
+                                      value={ssq.text} 
+                                      onChange={(e) => {
+                                        updateQuestion(ssq.id, { text: e.target.value }, q.id, sq.id);
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                      }}
+                                      onFocus={(e) => {
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                      }}
+                                      placeholder="نص النقطة..."
+                                      rows={1}
+                                      className="flex-1 bg-white px-2 sm:px-3 py-1.5 rounded border border-emerald-200 text-[11px] outline-none resize-none overflow-hidden placeholder:text-stone-300 shadow-sm"
+                                    />
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <ImageUpload 
+                                        label="سؤال" 
+                                        value={ssq.questionImage} 
+                                        onChange={(base64) => updateQuestion(ssq.id, { questionImage: base64 }, q.id, sq.id)}
+                                        onRemove={() => updateQuestion(ssq.id, { questionImage: undefined }, q.id, sq.id)}
+                                        compact
+                                      />
+                                      <input 
+                                        type="number" 
+                                        value={ssq.grade || ''} 
+                                        onChange={(e) => updateQuestion(ssq.id, { grade: Number(e.target.value) }, q.id, sq.id)}
+                                        placeholder="درجة"
+                                        className="w-10 px-1 py-0.5 rounded border border-emerald-200 text-[10px] text-center bg-white"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="p-1 bg-emerald-100 rounded-md">
+                                      <CheckSquare className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-700" />
+                                    </div>
+                                    <textarea 
+                                      value={ssq.answer} 
+                                      onChange={(e) => {
+                                        updateQuestion(ssq.id, { answer: e.target.value }, q.id, sq.id);
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                      }}
+                                      onFocus={(e) => {
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                      }}
+                                      placeholder="الجواب النموذجي للنقطة..."
+                                      rows={1}
+                                      className="flex-1 bg-white/80 px-2 sm:px-3 py-1.5 rounded border border-emerald-100 text-[10px] outline-none min-h-[32px] resize-none overflow-hidden shadow-sm"
+                                    />
+                                    <ImageUpload 
+                                      label="جواب" 
+                                      value={ssq.answerImage} 
+                                      onChange={(base64) => updateQuestion(ssq.id, { answerImage: base64 }, q.id, sq.id)}
+                                      onRemove={() => updateQuestion(ssq.id, { answerImage: undefined }, q.id, sq.id)}
+                                      compact
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {(!sq.subQuestions || sq.subQuestions.length === 0) && (
+                        <div className="space-y-2 animate-in fade-in duration-300">
+                          <div className="flex items-center gap-1.5 px-0.5">
+                            <CheckSquare className="w-3 h-3 text-emerald-600" />
+                            <span className="text-[9px] font-bold text-stone-500 text-right">إجابة الفرع النموذجية:</span>
+                          </div>
+                          <textarea 
+                            value={sq.answer} 
+                            onChange={(e) => {
+                              updateQuestion(sq.id, { answer: e.target.value }, q.id);
+                              e.target.style.height = 'auto';
+                              e.target.style.height = e.target.scrollHeight + 'px';
+                            }}
+                            onFocus={(e) => {
+                              e.target.style.height = 'auto';
+                              e.target.style.height = e.target.scrollHeight + 'px';
+                            }}
+                            placeholder="أدخل الإجابة النموذجية لهذا الفرع..."
+                            rows={1}
+                            className="w-full bg-emerald-50/30 px-3 py-2 rounded-lg border border-emerald-100 text-xs outline-none focus:ring-2 focus:ring-emerald-500 overflow-hidden resize-none min-h-[40px]"
+                          />
+                          <div className="grid grid-cols-2 gap-4 mt-2">
+                            <ImageUpload 
+                              label="صورة الجواب للفرع" 
+                              value={sq.answerImage} 
+                              onChange={(base64) => updateQuestion(sq.id, { answerImage: base64 }, q.id)}
+                              onRemove={() => updateQuestion(sq.id, { answerImage: undefined }, q.id)}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                )}
+
+                {(!q.subQuestions || q.subQuestions.length === 0) && (
+                  <div className="space-y-2 animate-in slide-in-from-bottom-2 duration-300">
+                    <div className="flex items-center gap-2 px-1">
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-xs font-bold text-stone-500">الإجابة النموذجية للسؤال:</span>
+                    </div>
+                    <textarea 
+                      value={q.answer} 
+                      onChange={(e) => {
+                        updateQuestion(q.id, { answer: e.target.value });
+                        e.target.style.height = 'auto';
+                        e.target.style.height = e.target.scrollHeight + 'px';
+                      }}
+                      onFocus={(e) => {
+                        e.target.style.height = 'auto';
+                        e.target.style.height = e.target.scrollHeight + 'px';
+                      }}
+                      placeholder="اكتب الإجابة التي سيتم التصحيح بناءً عليها..."
+                      rows={1}
+                      className="w-full bg-emerald-50/50 px-4 py-3 rounded-xl border border-emerald-100 outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-stone-400 text-stone-700 min-h-[80px] text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function VisualPaperOverlay({ imageUrl, gradings, studentName, totalGrade, maxGrade, isFirstPage, onAddMark }: any) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = e.currentTarget;
+    setDimensions({ width: naturalWidth, height: naturalHeight });
+  };
+
+  const handleContainerClick = (e: React.MouseEvent) => {
+    if (!onAddMark || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 1000;
+    const y = ((e.clientY - rect.top) / rect.height) * 1000;
+    
+    // Add a default mark at this location (roughly)
+    onAddMark([y - 20, x - 20, y + 20, x + 20]);
+  };
+
+  const finalMaxGrade = maxGrade || calculateRecursiveTotalGrade(Array.isArray(gradings) ? [] : []); // Fallback not easily possible here without questions structure
+  
+  return (
+    <div 
+      ref={containerRef} 
+      className="relative w-full rounded-2xl overflow-hidden shadow-sm border border-stone-200 bg-stone-100 cursor-crosshair"
+      onClick={handleContainerClick}
+    >
+      <img 
+        src={imageUrl} 
+        alt="" 
+        className="w-full h-auto block pointer-events-none" 
+        onLoad={handleImageLoad}
+        crossOrigin="anonymous"
+      />
+      {dimensions.width > 0 && (
+        <svg 
+          viewBox="0 0 1000 1000" 
+          preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full pointer-events-none"
+        >
+          {/* Marks for each grading */}
+          {gradings.map((g: any, i: number) => {
+            if (!g.box) return null;
+            const [ymin, xmin, ymax, xmax] = g.box;
+            const maxG = g.maxGrade || 0;
+            const isCorrect = g.grade > 0;
+            const isFull = maxG > 0 && g.grade >= maxG;
+            const isPartialLow = maxG > 0 && isCorrect && g.grade < (maxG * 0.7);
+            
+            // #059669 = Dark Green (Full)
+            // #f59e0b = Amber/Yellow (Partial Low < 70%)
+            // #10b981 = Emerald/Green (Partial High >= 70%)
+            // #dc2626 = Red (Zero)
+            const markColor = isFull ? "#059669" : (isPartialLow ? "#f59e0b" : "#10b981");
+            const finalColor = isCorrect ? markColor : "#dc2626";
+
+            return (
+              <g key={i}>
+                {/* The Mark (Check or Cross) */}
+                <text 
+                  x={xmax > 850 ? Math.max(xmin - 15, 50) : Math.min(xmax + 15, 950)} 
+                  y={Math.min(Math.max((ymin + ymax) / 2, 50), 950)} 
+                  fontSize="52" 
+                  fill={finalColor}
+                  className="font-bold select-none drop-shadow-md"
+                  textAnchor={xmax > 850 ? "end" : "start"}
+                  dominantBaseline="middle"
+                >
+                  {isCorrect ? "✓" : "×"}
+                </text>
+                {/* The Grade for the question */}
+                <rect 
+                  x={xmax > 850 ? Math.max(xmin - 75, 10) : Math.min(xmax + 75, 940)} 
+                  y={Math.min(Math.max(ymin, 10), 950)} 
+                  width="50" 
+                  height="40" 
+                  rx="8"
+                  fill="white"
+                  fillOpacity="0.95"
+                  stroke={finalColor}
+                  strokeWidth="2.5"
+                  className="drop-shadow-sm"
+                />
+                <text 
+                  x={xmax > 850 ? Math.max(xmin - 50, 35) : Math.min(xmax + 100, 965)} 
+                  y={Math.min(Math.max(ymin + 26, 36), 976)} 
+                  fontSize="22" 
+                  fill={finalColor}
+                  className="font-bold select-none"
+                  textAnchor="middle"
+                >
+                  {g.grade}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Student Final Grade Overlay (Top Right) */}
+          {isFirstPage && (
+            <g transform="translate(800, 50)">
+              <circle cx="50" cy="50" r="45" fill="white" fillOpacity="0.9" stroke="#059669" strokeWidth="4" />
+              <text x="50" y="45" fontSize="24" fill="#059669" fontWeight="bold" textAnchor="middle">الدرجة</text>
+              <line x1="20" y1="52" x2="80" y2="52" stroke="#059669" strokeWidth="2" />
+              <text x="50" y="78" fontSize="22" fill="#059669" fontWeight="bold" textAnchor="middle">{totalGrade} / {finalMaxGrade || '?'}</text>
+              
+              <text x="-150" y="40" fontSize="24" fill="#374151" fontWeight="bold" textAnchor="end" className="italic">{studentName}</text>
+            </g>
+          )}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any) {
+  const [images, setImages] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [gradingMode, setGradingMode] = useState<'digital' | 'paper'>('digital');
+  const [isGrading, setIsGrading] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0, phase: '' });
+  const [selectedSubject, setSelectedSubject] = useState<string>(exam.title || 'رياضيات');
+  const [gradingResults, setGradingResults] = useState<any[]>([]);
+  const [currentResultIndex, setCurrentResultIndex] = useState(0);
+  const [targetSessionId, setTargetSessionId] = useState<string>('new');
+  const [newSessionName, setNewSessionName] = useState<string>('');
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const examSessions = sessions.filter((s: any) => s.examId === exam.id);
+
+  useEffect(() => {
+    if (examSessions.length === 0) {
+      setTargetSessionId('new');
+      const date = new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' });
+      setNewSessionName(`تصحيح - ${date}`);
+    }
+  }, [examSessions.length]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files);
+      if (images.length + newFiles.length > 24) {
+        alert('عذراً، لا يمكن رفع أكثر من 24 صفحة في المرة الواحدة.');
+        return;
+      }
+      setImages([...images, ...newFiles]);
+      const newPreviews = newFiles.map(file => URL.createObjectURL(file));
+      setPreviews([...previews, ...newPreviews]);
+    }
+  };
+
+  const startGrading = async () => {
+    if (images.length === 0) return alert('يرجى رفع صور أوراق الطلاب');
+    
+    // Check usage limit
+    if (userProfile && (userProfile.pagesUsed + images.length) > userProfile.pageLimit) {
+      return alert(`عذراً، لقد تجاوزت الحد المسموح به من الصفحات (${userProfile.pageLimit}). يرجى التواصل مع الإدارة لزيادة الحد.`);
+    }
+
+    setIsGrading(true);
+    setProgress({ current: 0, total: images.length, phase: 'compressing' });
+    try {
+      const { results } = await gradeStudentPaper(
+        previews, 
+        exam.questions, 
+        exam.totalGrade, 
+        exam.requiredQuestionsCount,
+        selectedSubject,
+        (current, total, phase) => setProgress({ current, total, phase })
+      );
+      if (!results || results.length === 0) {
+        throw new Error("لم يتم العثور على نتائج في الأوراق المرفوعة. تأكد من وضوح الصور وجودة الخط.");
+      }
+
+      // Update user usage stats atomically
+      if (userProfile) {
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            pagesUsed: increment(images.length),
+            gradingsCount: increment(results.length)
+          }, { merge: true });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+        }
+      }
+
+      setGradingResults(results);
+      setCurrentResultIndex(0);
+    } catch (e: any) {
+      console.error("Grading error:", e);
+      alert(`عذراً، حدث خطأ أثناء التصحيح: ${e.message || 'خطأ غير معروف'}`);
+    } finally {
+      setIsGrading(false);
+      setProgress({ current: 0, total: 0, phase: '' });
+    }
+  };
+
+  const saveAllResults = async () => {
+    if (targetSessionId === 'new' && !newSessionName.trim()) {
+      alert('يرجى إدخال اسم للمجلد الجديد');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // 1. Get or Create a session document
+      let sessionId = targetSessionId;
+      
+      if (targetSessionId === 'new') {
+        try {
+          const sessionRef = await addDoc(collection(db, 'sessions'), {
+            examId: exam.id,
+            examTitle: exam.title,
+            sessionName: newSessionName || exam.title,
+            authorUid: user.uid,
+            studentCount: gradingResults.length,
+            createdAt: serverTimestamp()
+          });
+          sessionId = sessionRef.id;
+        } catch (e) {
+          handleFirestoreError(e, OperationType.CREATE, 'sessions');
+        }
+      } else {
+        try {
+          await updateDoc(doc(db, 'sessions', targetSessionId), {
+            studentCount: increment(gradingResults.length)
+          });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, `sessions/${targetSessionId}`);
+        }
+      }
+
+      // 2. Save each result with the sessionId
+      for (const result of gradingResults) {
+        try {
+          // Recalculate total grade to ensure it's accurate from the final corrected marks
+          const computedTotal = calculateGradingTotal(result.gradings);
+          
+          // Ensure studentName is not empty to satisfy security rules
+          const studentName = (result.studentName && result.studentName.trim()) 
+            ? result.studentName.trim() 
+            : `طالب #${Math.floor(Math.random() * 1000)}`;
+
+          await addDoc(collection(db, 'results'), {
+            studentName: studentName,
+            gradings: result.gradings,
+            totalGrade: computedTotal,
+            sessionId: sessionId,
+            examId: exam.id,
+            examTitle: exam.title,
+            authorUid: user.uid,
+            createdAt: serverTimestamp()
+          });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.CREATE, 'results');
+        }
+      }
+      setShowSaveModal(false);
+      onComplete();
+    } catch (e: any) {
+      console.error("Save error details:", e);
+      let errorMsg = 'حدث خطأ أثناء حفظ النتائج';
+      try {
+        const errorData = JSON.parse(e.message);
+        if (errorData.error.includes('permission')) {
+          errorMsg = 'عذراً، لا تملك صلاحية الحفظ. يرجى التأكد من تسجيل الدخول والموافقة على حسابك.';
+        } else {
+          errorMsg = `خطأ: ${errorData.error}`;
+        }
+      } catch {
+        errorMsg = `حدث خطأ: ${e.message}`;
+      }
+      alert(errorMsg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const currentGrading = gradingResults[currentResultIndex];
+  const realTotalGrade = calculateGradingTotal(currentGrading?.gradings);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="max-w-4xl mx-auto space-y-8"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold font-serif italic">تصحيح الأوراق</h2>
+          <p className="text-stone-500">امتحان: {exam.title}</p>
+        </div>
+        <button onClick={onCancel} className="text-stone-400 hover:text-stone-900 transition-colors">إلغاء</button>
+      </div>
+
+      {gradingResults.length === 0 ? (
+        <div className="bg-white p-12 rounded-3xl border-2 border-dashed border-stone-200 text-center space-y-6">
+          <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto">
+            <Upload className="w-10 h-10 text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold mb-2">ارفع صور أوراق الطلاب</h3>
+            <p className="text-stone-400 max-w-sm mx-auto">يمكنك رفع عدة صور لنفس الطالب. سيتعرف النظام على اسم الطالب من الورقة الأولى.</p>
+          </div>
+          <input 
+            type="file" 
+            multiple 
+            accept="image/*" 
+            className="hidden" 
+            ref={fileInputRef} 
+            onChange={handleFileChange}
+          />
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment"
+            className="hidden" 
+            ref={cameraInputRef} 
+            onChange={handleFileChange}
+          />
+          <div className="flex flex-wrap gap-4 justify-center">
+            {previews.map((url, i) => (
+              <div key={i} className="relative w-24 h-32 rounded-lg overflow-hidden border border-stone-200 group">
+                <img src={url} alt="" className="w-full h-full object-cover" crossOrigin="anonymous" />
+                <button 
+                  onClick={() => {
+                    setPreviews(previews.filter((_, idx) => idx !== i));
+                    setImages(images.filter((_, idx) => idx !== i));
+                  }}
+                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col items-center gap-2">
+            {/* Subject selector removed — the AI now auto-detects per-question type (numeric vs textual) */}
+
+            <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+              <HelpCircle className="w-3 h-3" />
+              بإمكانك رفع حتى 24 صفحة في المرة الواحدة لضمان سرعة المعالجة
+            </p>
+            <div className="flex flex-col items-center gap-4 w-full">
+              <div className="flex bg-stone-100 p-1.5 rounded-2xl gap-2 w-full max-w-sm">
+              <button 
+                onClick={() => setGradingMode('digital')}
+                className={cn(
+                  "flex-1 flex flex-col items-center py-3 rounded-xl transition-all gap-1",
+                  gradingMode === 'digital' 
+                    ? "bg-white text-emerald-700 shadow-sm" 
+                    : "text-stone-400 hover:text-stone-600"
+                )}
+              >
+                <div className="flex items-center gap-1.5">
+                  <FileText className="w-4 h-4" />
+                  <span className="font-bold text-sm">تقرير رقمي</span>
+                </div>
+                <span className="text-[10px] opacity-70">عرض النتائج كتقرير وجدول</span>
+              </button>
+              <button 
+                onClick={() => setGradingMode('paper')}
+                className={cn(
+                  "flex-1 flex flex-col items-center py-3 rounded-xl transition-all gap-1",
+                  gradingMode === 'paper' 
+                    ? "bg-white text-emerald-700 shadow-sm" 
+                    : "text-stone-400 hover:text-stone-600"
+                )}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Layers className="w-4 h-4" />
+                  <span className="font-bold text-sm">تصحيح ورقي</span>
+                </div>
+                <span className="text-[10px] opacity-70">وضع العلامات على صورة الورقة</span>
+              </button>
+            </div>
+
+            <div className="flex justify-center gap-4 w-full">
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 px-4 sm:px-8 py-3 rounded-2xl border border-stone-200 font-medium hover:bg-stone-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span className="hidden sm:inline">اختيار الصور</span>
+                <span className="sm:hidden text-xs">ارفع صور</span>
+              </button>
+              <button 
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex-1 px-4 sm:px-8 py-3 rounded-2xl border border-stone-200 font-medium hover:bg-stone-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <Camera className="w-4 h-4" />
+                <span className="hidden sm:inline">فتح الكاميرا</span>
+                <span className="sm:hidden text-xs">الكاميرا</span>
+              </button>
+              <button 
+                onClick={startGrading}
+                disabled={images.length === 0 || isGrading}
+                className="flex-[2] px-6 sm:px-8 py-3 rounded-2xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isGrading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+                {isGrading && progress.total > 0 
+                  ? `${progress.phase === 'compressing' ? 'جاري ضغط الصور' : 'جاري التصحيح'} (${progress.current}/${progress.total})...` 
+                  : (gradingMode === 'paper' ? 'بدء التصحيح الورقي' : 'بدء التصحيح الذكي')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      ) : (
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6"
+          id="current-grading-result"
+        >
+          <div className="bg-white p-4 sm:p-8 rounded-3xl border border-stone-200 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-6 border-b border-stone-100 pb-8">
+              <div className="text-center sm:text-right">
+                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-[0.2em] mb-1 block">
+                  {gradingMode === 'digital' ? 'تقرير التصحيح الرقمي' : 'عرض التصحيح الورقي'}
+                </span>
+                <h3 className="text-2xl sm:text-3xl font-black text-stone-900 leading-tight">
+                  {currentGrading.studentName}
+                </h3>
+                <div className="mt-2 flex items-center gap-2 text-stone-400 text-sm font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  تم رصد النتيجة النهائية بنجاح
+                </div>
+              </div>
+              
+              <div className="relative group">
+                <div className="absolute -inset-4 bg-emerald-100 rounded-[2.5rem] opacity-30 blur-xl group-hover:opacity-50 transition-opacity" />
+                <div className="relative bg-emerald-50/50 border-2 border-emerald-100/50 px-8 py-6 rounded-[2rem] flex flex-col items-center justify-center min-w-[200px]">
+                  <span className="text-[11px] font-black text-emerald-800 uppercase tracking-widest mb-1 underline decoration-emerald-200 underline-offset-4">
+                    الدرجة النهائية
+                  </span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-5xl sm:text-6xl font-black text-emerald-600 tracking-tighter">
+                      {formatGrade(realTotalGrade)}
+                    </span>
+                    <span className="text-xl sm:text-2xl font-bold text-emerald-300">/ {formatGrade(exam.totalGrade || calculateRecursiveTotalGrade(exam.questions))}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {gradingMode === 'digital' ? (
+              <div className="space-y-4">
+                {exam.questions.map((q: any) => (
+                  <GradingResultItem 
+                    key={q.id} 
+                    question={q} 
+                    gradings={currentGrading.gradings} 
+                    onGradeChange={(qId: string, newGrade: number) => {
+                      const newGradings = currentGrading.gradings.map((g: any) => 
+                        g.questionId === qId ? { ...g, grade: newGrade } : g
+                      );
+                      const newTotal = newGradings.reduce((acc: any, curr: any) => acc + curr.grade, 0);
+                      const newResults = [...gradingResults];
+                      newResults[currentResultIndex] = { ...currentGrading, gradings: newGradings, totalGrade: newTotal };
+                      setGradingResults(newResults);
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {Array.from(new Set(currentGrading.gradings.map((g: any) => g.pageIndex)))
+                  .filter((idx): idx is number => idx !== undefined && idx !== null)
+                  .sort((a, b) => a - b)
+                  .map((pageIdx, i) => (
+                    <div key={pageIdx} className="space-y-2">
+                      <div className="flex items-center justify-between text-stone-400 text-xs px-2">
+                        <span>الصفحة {i + 1}</span>
+                        <span>رقم الصورة في المتصفح: {pageIdx + 1}</span>
+                      </div>
+                      <VisualPaperOverlay 
+                        imageUrl={previews[pageIdx]}
+                        gradings={currentGrading.gradings.filter((g: any) => g.pageIndex === pageIdx)}
+                        studentName={currentGrading.studentName}
+                        totalGrade={currentGrading.totalGrade}
+                        maxGrade={exam.totalGrade}
+                        isFirstPage={i === 0}
+                        onAddMark={(box: [number, number, number, number]) => {
+                          const newGrading = {
+                            questionId: `manual_${Date.now()}`,
+                            studentAnswer: 'تأشير يدوي',
+                            grade: 1, // Default grade
+                            feedback: 'تمت الإضافة يدوياً',
+                            box,
+                            pageIndex: pageIdx
+                          };
+                          const newGradings = [...currentGrading.gradings, newGrading];
+                          const newTotal = newGradings.reduce((acc: any, curr: any) => acc + curr.grade, 0);
+                          const newResults = [...gradingResults];
+                          newResults[currentResultIndex] = { ...currentGrading, gradings: newGradings, totalGrade: newTotal };
+                          setGradingResults(newResults);
+                        }}
+                      />
+                    </div>
+                  ))
+                }
+                {currentGrading.gradings.every((g: any) => g.pageIndex === undefined) && (
+                  <div className="text-center p-12 bg-stone-50 rounded-2xl border-2 border-dashed border-stone-200 text-stone-400">
+                    لم يتم تحديد مواقع الإجابات على الورقة لهذا الطالب. يرجى استخدام التقرير الرقمي.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col md:flex-row justify-between items-center gap-6 pt-6 border-t border-stone-100">
+              <div className="flex flex-wrap items-center justify-center gap-3 w-full md:w-auto">
+                <div className="flex gap-2">
+                  <button 
+                    disabled={currentResultIndex === 0}
+                    onClick={() => setCurrentResultIndex(currentResultIndex - 1)}
+                    className="px-4 py-2 rounded-xl border border-stone-200 disabled:opacity-30 hover:bg-stone-50 transition-colors"
+                  >
+                    السابق
+                  </button>
+                  <button 
+                    disabled={currentResultIndex === gradingResults.length - 1}
+                    onClick={() => setCurrentResultIndex(currentResultIndex + 1)}
+                    className="px-4 py-2 rounded-xl border border-stone-200 disabled:opacity-30 hover:bg-stone-50 transition-colors"
+                  >
+                    التالي
+                  </button>
+                </div>
+                <span className="text-stone-400 text-sm font-medium bg-stone-50 px-3 py-1.5 rounded-lg">
+                  طالب {currentResultIndex + 1} من {gradingResults.length}
+                </span>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto mt-4 md:mt-0 pb-4 md:pb-0">
+                <button 
+                  onClick={async () => {
+                    const element = document.getElementById(`current-grading-result`);
+                    if (element) {
+                      const isPaper = gradingMode === 'paper';
+                      await generatePDFFromElement(
+                        element, 
+                        `${currentGrading.studentName}_${isPaper ? 'تصحيح_ورقي' : 'نتيجة'}.pdf`, 
+                        { padding: isPaper ? '5mm' : '20mm', ignoreImages: !isPaper }
+                      );
+                    }
+                  }}
+                  className="flex-1 sm:flex-none px-4 py-3 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 flex items-center justify-center gap-2 transition-all font-bold"
+                >
+                  <Download className="w-4 h-4" />
+                  {gradingMode === 'paper' ? 'تحميل الأوراق المصححة (PDF)' : 'تحميل النتيجة (PDF)'}
+                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setGradingResults([])} 
+                    className="flex-1 px-4 py-3 rounded-xl text-stone-500 hover:bg-stone-100 transition-colors text-sm font-medium border border-transparent"
+                  >
+                    إلغاء
+                  </button>
+                  {gradingMode === 'paper' && (
+                    <button 
+                      onClick={async () => {
+                        setIsSaving(true);
+                        try {
+                          alert('سيبدأ الآن تحميل أوراق جميع الطلاب... قد يستغرق هذا وقتاً طويلاً. يرجى الانتظار.');
+                          for (let i = 0; i < gradingResults.length; i++) {
+                            setCurrentResultIndex(i);
+                            // Wait for render
+                            await new Promise(r => setTimeout(r, 1500));
+                            const element = document.getElementById(`current-grading-result`);
+                            if (element) {
+                              await generatePDFFromElement(
+                                element, 
+                                `طالب_${i+1}_${gradingResults[i].studentName}_تصحيح_ورقي.pdf`, 
+                                { padding: '5mm', ignoreImages: false }
+                              );
+                            }
+                          }
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }} 
+                      className="flex-1 px-4 py-3 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold hover:bg-emerald-100 active:scale-95 transition-all text-center flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      تحميل الكل
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setShowSaveModal(true)} 
+                    className="flex-[2] px-8 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 active:scale-95 transition-all text-center"
+                  >
+                    {gradingMode === 'paper' ? 'حفظ في المجلد' : 'حفظ جميع النتائج'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Save Modal */}
+          <AnimatePresence>
+            {showSaveModal && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => !isSaving && setShowSaveModal(false)}
+                  className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm"
+                />
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden"
+                >
+                  <div className="p-8 space-y-6">
+                    <div className="flex items-center gap-3 text-emerald-600">
+                      <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center">
+                        <Folder className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-stone-900">مراجعة وحفظ النتائج</h3>
+                        <p className="text-stone-400 text-sm">سيتم حفظ {gradingResults.length} طالباً في المجلد</p>
+                      </div>
+                    </div>
+
+                    {/* Simple summary of grades */}
+                    <div className="bg-stone-50 rounded-2xl p-4 max-h-48 overflow-y-auto border border-stone-100 space-y-2">
+                       {gradingResults.map((res: any, idx: number) => (
+                         <div key={idx} className="flex items-center justify-between py-2 border-b border-stone-100 last:border-0 px-2">
+                           <div className="flex items-center gap-2">
+                             <span className="w-6 h-6 bg-stone-200 rounded-full text-[10px] flex items-center justify-center font-mono">{idx + 1}</span>
+                             <span className="font-bold text-stone-700 text-sm truncate max-w-[200px]">{res.studentName || 'طالب غير معروف'}</span>
+                           </div>
+                           <div className="flex items-center gap-1">
+                             <span className="text-stone-400 text-xs">الدرجة:</span>
+                             <span className={`font-bold ${res.totalGrade >= (exam.totalGrade * 0.5) ? 'text-emerald-600' : 'text-red-500'}`}>
+                               {res.totalGrade}
+                             </span>
+                             <span className="text-stone-300 text-[10px]">/ {exam.totalGrade}</span>
+                           </div>
+                         </div>
+                       ))}
+                    </div>
+
+                    <div className="space-y-4">
+                      {examSessions.length > 0 && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-bold text-stone-700 block mr-1">إضافة إلى مجلد موجود:</label>
+                          <select 
+                            value={targetSessionId}
+                            onChange={(e) => setTargetSessionId(e.target.value)}
+                            className="w-full p-4 rounded-2xl border border-stone-200 bg-stone-50 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                          >
+                            <option value="new">+ إنشاء مجلد جديد</option>
+                            {examSessions.map((s: any) => (
+                              <option key={s.id} value={s.id}>{s.sessionName || s.examTitle} ({s.studentCount} طلاب)</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {targetSessionId === 'new' && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-bold text-stone-700 block mr-1">اسم المجلد الجديد:</label>
+                          <input 
+                            type="text"
+                            value={newSessionName}
+                            onChange={(e) => setNewSessionName(e.target.value)}
+                            placeholder="مثلاً: تصحيح الشهر الأول"
+                            className="w-full p-4 rounded-2xl border border-stone-200 bg-stone-50 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                            autoFocus
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                      <button 
+                        disabled={isSaving}
+                        onClick={() => setShowSaveModal(false)}
+                        className="flex-1 py-4 rounded-2xl font-bold text-stone-400 hover:bg-stone-50 transition-colors"
+                      >
+                        إلغاء
+                      </button>
+                      <button 
+                        disabled={isSaving}
+                        onClick={saveAllResults}
+                        className="flex-[2] bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                        تأكيد الحفظ
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Hidden container for PDF capture of current result */}
+          <div className="fixed top-[-9999px] left-0 w-[210mm] pdf-export-container">
+            <div id="current-grading-result" className="bg-white p-10 space-y-8">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-6">
+                <div>
+                  <h3 className="text-3xl font-bold">الطالب: {currentGrading.studentName}</h3>
+                  <p className="text-stone-500 mt-2 text-lg">الامتحان: {exam.title}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-stone-400 text-sm">الدرجة النهائية</span>
+                  <div className="text-5xl font-bold text-emerald-600">
+                    {currentGrading.totalGrade}
+                    <span className="text-xl text-stone-300"> / {exam.totalGrade}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                {exam.questions.map((q: any) => (
+                  <GradingResultItem 
+                    key={q.id} 
+                    question={q} 
+                    gradings={currentGrading.gradings} 
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </motion.div>
+  );
+}
+
+
+function ResultsView({ results, sessions, exams, onBack }: any) {
+  const [selectedResult, setSelectedResult] = useState<any>(null);
+  const [selectedSession, setSelectedSession] = useState<any>(null);
+  const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
+  const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
+
+  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingAll, setIsExportingAll] = useState(false);
+  const resultPrintRef = useRef<HTMLDivElement>(null);
+  const allResultsPrintRef = useRef<HTMLDivElement>(null);
+
+  const exportPDF = async (result: any) => {
+    console.log(`[ResultsView] Exporting PDF for student: ${result.studentName}`);
+    setIsExporting(true);
+    try {
+      // 1. Priority: Use the visible ref if it's the same student
+      if (selectedResult?.id === result.id && resultPrintRef.current) {
+        console.log(`[ResultsView] Using visible resultPrintRef`);
+        await generatePDFFromElement(resultPrintRef.current, `${result.studentName}_نتيجة.pdf`, { padding: '20mm', ignoreImages: true });
+        return;
+      }
+
+      // 2. Fallback: Use the hidden list element
+      const element = document.getElementById(`print-result-list-${result.id}`);
+      if (element) {
+        console.log(`[ResultsView] Using hidden list element`);
+        await generatePDFFromElement(element, `${result.studentName}_نتيجة.pdf`, { padding: '20mm', ignoreImages: true });
+      } else {
+        console.warn(`[ResultsView] Element not found for result: ${result.id}`);
+        alert('يرجى فتح تفاصيل الطالب أولاً لتحميل الملف');
+      }
+    } catch (error) {
+      console.error(`[ResultsView] Error in exportPDF:`, error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const exportAllPDF = async () => {
+    if (!allResultsPrintRef.current) return;
+    setIsExportingAll(true);
+    try {
+      await generatePDFFromElement(allResultsPrintRef.current, `all_results_${selectedSession.examTitle}.pdf`);
+    } finally {
+      setIsExportingAll(false);
+    }
+  };
+
+  const years = Array.from(new Set(sessions.map((s: any) => s.createdAt?.toDate().getFullYear()))).sort((a: any, b: any) => b - a);
+  const months = [
+    { id: 1, name: 'يناير' }, { id: 2, name: 'فبراير' }, { id: 3, name: 'مارس' },
+    { id: 4, name: 'أبريل' }, { id: 5, name: 'مايو' }, { id: 6, name: 'يونيو' },
+    { id: 7, name: 'يوليو' }, { id: 8, name: 'أغسطس' }, { id: 9, name: 'سبتمبر' },
+    { id: 10, name: 'أكتوبر' }, { id: 11, name: 'نوفمبر' }, { id: 12, name: 'ديسمبر' }
+  ];
+
+  const filteredSessions = sessions.filter((s: any) => {
+    const date = s.createdAt?.toDate();
+    if (!date) return true;
+    const yearMatch = selectedYear === 'all' || date.getFullYear() === selectedYear;
+    const monthMatch = selectedMonth === 'all' || (date.getMonth() + 1) === selectedMonth;
+    return yearMatch && monthMatch;
+  }).sort((a: any, b: any) => b.createdAt?.toDate() - a.createdAt?.toDate());
+
+  const sessionResults = results.filter((r: any) => r.sessionId === selectedSession?.id);
+
+  const copyResultsToClipboard = () => {
+    const tableHeader = "اسم الطالب\tالدرجة\n";
+    const tableData = sessionResults.map((r: any) => `${r.studentName || 'بدون اسم'}\t${r.totalGrade}`).join('\n');
+    navigator.clipboard.writeText(tableHeader + tableData)
+      .then(() => alert('تم نسخ القائمة (لصق في إكسل مباشرة)'))
+      .catch((err) => console.error('Failed to copy: ', err));
+  };
+
+  const deleteSession = async (e: React.MouseEvent, session: any) => {
+    e.stopPropagation();
+    if (!confirm(`هل أنت متأكد من حذف المجلد "${session.sessionName || session.examTitle}"؟ سيتم حذف جميع نتائج الطلاب المرتبطة به.`)) return;
+
+    try {
+      // 1. Delete all results associated with this session
+      const resultsQuery = query(collection(db, 'results'), where('sessionId', '==', session.id));
+      const resultsSnapshot = await getDocs(resultsQuery);
+      
+      const batch = writeBatch(db);
+      resultsSnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      
+      // 2. Delete the session itself
+      batch.delete(doc(db, 'sessions', session.id));
+      
+      await batch.commit();
+      alert('تم حذف المجلد وجميع نتائجه بنجاح.');
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      alert('حدث خطأ أثناء حذف المجلد.');
+    }
+  };
+
+  if (selectedResult) {
+    const exam = exams.find((e: any) => e.id === selectedResult.examId);
+    return (
+      <motion.div 
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="space-y-8"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2 md:px-0" data-html2canvas-ignore>
+          <button onClick={() => setSelectedResult(null)} className="flex items-center gap-2 text-stone-500 hover:text-stone-900 transition-colors w-fit font-bold">
+            <ArrowRight className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
+            العودة لقائمة الطلاب
+          </button>
+          <button 
+            onClick={() => exportPDF(selectedResult)}
+            disabled={isExporting}
+            className="w-full sm:w-auto bg-emerald-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-50 shadow-sm"
+          >
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            تحميل تقرير النتيجة (PDF)
+          </button>
+        </div>
+
+        <div ref={resultPrintRef} id={`print-result-${selectedResult.id}`} className="bg-white p-4 md:p-8 border shadow-sm rounded-3xl space-y-8 pdf-export-container">
+          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-stone-100 pb-6 gap-6">
+            <div className="text-right">
+              <h3 className="text-xl md:text-2xl font-bold text-stone-900 break-words">{selectedResult.studentName || 'اسم غير معروف'}</h3>
+              <p className="text-stone-500 mt-1 text-sm md:text-base">{selectedResult.examTitle || 'امتحان غير محدد'}</p>
+              {selectedResult.createdAt && (
+                <p className="text-stone-400 text-[10px] md:text-sm mt-1">التاريخ: {selectedResult.createdAt.toDate().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              )}
+            </div>
+            <div className="text-right md:text-left flex flex-row md:flex-col items-center md:items-end justify-between md:justify-center bg-stone-50 md:bg-transparent p-4 md:p-0 rounded-2xl border border-stone-100 md:border-0">
+              <span className="text-stone-400 text-xs font-bold md:text-sm">الدرجة النهائية</span>
+              <div className="text-3xl md:text-5xl font-bold text-emerald-600">
+                {selectedResult.totalGrade}
+                <span className="text-lg md:text-xl text-stone-300"> / {exam?.totalGrade || '?'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {exam?.questions.map((q: any) => (
+              <GradingResultItem 
+                key={q.id} 
+                question={q} 
+                gradings={selectedResult.gradings} 
+              />
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (selectedSession) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="space-y-8"
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 px-2">
+          <button onClick={() => setSelectedSession(null)} className="flex items-center gap-2 text-stone-500 hover:text-stone-900 transition-colors w-fit font-bold text-sm">
+            <ArrowRight className="w-5 h-5" />
+            العودة للقائمة الرئيسية
+          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-4 rounded-2xl border border-stone-100 shadow-sm">
+            <div className="text-right sm:ml-6 ml-0 mb-4 sm:mb-0">
+              <h3 className="text-lg font-bold text-stone-900">{selectedSession.sessionName || selectedSession.examTitle}</h3>
+              <p className="text-stone-400 text-xs">{selectedSession.createdAt?.toDate().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            </div>
+            <button 
+              onClick={exportAllPDF}
+              disabled={isExportingAll}
+              className="w-full sm:w-auto bg-emerald-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-50 shadow-lg shadow-emerald-600/20 font-bold"
+            >
+              {isExportingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              تحميل كل النتائج (PDF)
+            </button>
+            <button 
+              onClick={copyResultsToClipboard}
+              className="w-full sm:w-auto bg-stone-100 text-stone-600 px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-stone-200 transition-colors font-bold border border-stone-200"
+            >
+              <LayoutGrid className="w-4 h-4" />
+              نسخ للجدول (EXCEL)
+            </button>
+          </div>
+        </div>
+
+        {/* Hidden area for printing all results */}
+        <div className="fixed top-[-9999px] left-0 w-[210mm] pdf-export-container" ref={allResultsPrintRef}>
+          {sessionResults.map((res: any) => (
+            <div key={res.id} className="bg-white p-10 mb-10 border-b-2" style={{ pageBreakAfter: 'always' }}>
+              <div className="flex items-center justify-between border-b border-stone-100 pb-6 mb-8">
+                <div>
+                  <h3 className="text-3xl font-bold">نتيجة الطالب: {res.studentName}</h3>
+                  <p className="text-stone-500 mt-2 text-lg">الامتحان: {res.examTitle}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-stone-400 text-sm">الدرجة النهائية</span>
+                  <div className="text-5xl font-bold text-emerald-600">
+                    {res.totalGrade}
+                    <span className="text-xl text-stone-300"> / {exams.find((e: any) => e.id === res.examId)?.totalGrade || '?'}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                {exams.find((e: any) => e.id === res.examId)?.questions.map((q: any) => (
+                  <GradingResultItem 
+                    key={q.id} 
+                    question={q} 
+                    gradings={res.gradings} 
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Hidden area for individual printing from list */}
+        <div className="fixed top-[-9999px] left-0 w-[210mm] pdf-export-container">
+          {sessionResults.map((res: any) => (
+            <div key={res.id} id={`print-result-list-${res.id}`} className="bg-white p-10">
+               <div className="flex items-center justify-between border-b border-stone-100 pb-6 mb-8">
+                <div>
+                  <h3 className="text-3xl font-bold">نتيجة الطالب: {res.studentName}</h3>
+                  <p className="text-stone-500 mt-2 text-lg">الامتحان: {res.examTitle}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-stone-400 text-sm">الدرجة النهائية</span>
+                  <div className="text-5xl font-bold text-emerald-600">
+                    {res.totalGrade}
+                    <span className="text-xl text-stone-300"> / {exams.find((e: any) => e.id === res.examId)?.totalGrade || '?'}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                {exams.find((e: any) => e.id === res.examId)?.questions.map((q: any) => (
+                  <GradingResultItem 
+                    key={q.id} 
+                    question={q} 
+                    gradings={res.gradings} 
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
+          <div className="md:hidden divide-y divide-stone-100">
+            {sessionResults.length > 0 ? sessionResults.map((res: any) => (
+              <div 
+                key={res.id} 
+                className="p-5 active:bg-stone-50 transition-colors space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="font-bold text-stone-900 break-all max-w-[200px]">{res.studentName || 'بدون اسم'}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">الدرجة النهائية:</span>
+                      <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
+                        {res.totalGrade ?? 0}
+                      </span>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => exportPDF(res)}
+                    className="p-3 bg-stone-50 text-stone-400 rounded-xl hover:text-emerald-600 transition-colors"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                </div>
+                <button 
+                  onClick={() => setSelectedResult(res)}
+                  className="w-full py-3.5 rounded-xl bg-stone-900 text-white font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-stone-900/10"
+                >
+                  عرض تفاصيل النتيجة
+                  <ArrowRight className="w-4 h-4 rotate-180" />
+                </button>
+              </div>
+            )) : (
+              <div className="p-16 text-center space-y-4">
+                <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mx-auto">
+                  <FileText className="w-8 h-8 text-stone-300" />
+                </div>
+                <div>
+                  <p className="text-stone-900 font-bold">لا توجد نتائج</p>
+                  <p className="text-stone-400 text-sm">لم يتم العثور على نتائج مسجلة لهذه المجموعة.</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <table className="hidden md:table w-full text-right">
+            <thead>
+              <tr className="bg-stone-50 border-b border-stone-200">
+                <th className="px-6 py-4 font-bold text-stone-500 text-sm text-right">اسم الطالب</th>
+                <th className="px-6 py-4 font-bold text-stone-500 text-sm text-right">الدرجة</th>
+                <th className="px-6 py-4 font-bold text-stone-500 text-sm text-left">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {sessionResults.map((res: any) => (
+                <tr key={res.id} className="hover:bg-stone-50 transition-colors group">
+                  <td className="px-6 py-5 font-bold text-stone-900">{res.studentName}</td>
+                  <td className="px-6 py-5">
+                    <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl font-black text-sm border border-emerald-100/50">
+                      {res.totalGrade}
+                    </span>
+                  </td>
+                  <td className="px-6 py-5 text-left">
+                    <div className="flex items-center justify-end gap-3">
+                      <button 
+                        onClick={() => setSelectedResult(res)}
+                        className="px-5 py-2 rounded-xl bg-stone-900 text-white text-xs font-bold hover:bg-emerald-600 transition-all shadow-sm active:scale-95"
+                      >
+                        عرض التفاصيل
+                      </button>
+                      <button 
+                        onClick={() => exportPDF(res)}
+                        className="p-2.5 bg-stone-50 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                        title="تحميل النتيجة PDF"
+                      >
+                        <Download className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {sessionResults.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-6 py-10 text-center text-stone-400 italic">لا توجد نتائج في هذه المجموعة</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-8"
+    >
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-bold font-serif italic">نتائج الطلاب</h2>
+          <p className="text-sm md:text-base text-stone-500">مجموعات التصحيح المنظمة حسب التاريخ</p>
+        </div>
+        <button onClick={onBack} className="text-stone-400 hover:text-stone-900 transition-colors w-fit">العودة</button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+        <div className="flex items-center gap-3">
+          <Calendar className="w-5 h-5 text-stone-400" />
+          <select 
+            value={selectedYear} 
+            onChange={(e) => setSelectedYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            className="bg-stone-50 px-4 py-2 rounded-xl border border-stone-200 outline-none text-sm"
+          >
+            <option value="all">كل السنوات</option>
+            {years.map((y: any) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <select 
+            value={selectedMonth} 
+            onChange={(e) => setSelectedMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            className="bg-stone-50 px-4 py-2 rounded-xl border border-stone-200 outline-none text-sm"
+          >
+            <option value="all">كل الشهور</option>
+            {months.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <div className="mr-auto flex items-center gap-2 text-sm text-stone-400">
+          <span>إجمالي المجموعات:</span>
+          <span className="font-bold text-stone-900">{filteredSessions.length}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredSessions.map((session: any) => (
+          <div 
+            key={session.id} 
+            onClick={() => setSelectedSession(session)}
+            className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm hover:shadow-md transition-all cursor-pointer group"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-stone-100 rounded-2xl flex items-center justify-center text-stone-600 group-hover:bg-emerald-50 group-hover:text-emerald-600 transition-colors">
+                <Folder className="w-6 h-6" />
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <div className="text-[10px] font-bold text-stone-400 bg-stone-50 px-2 py-1 rounded-lg">
+                  {session.createdAt?.toDate().toLocaleDateString('ar-EG', { month: 'short', year: 'numeric' })}
+                </div>
+                <button 
+                  onClick={(e) => deleteSession(e, session)}
+                  className="p-2 text-stone-300 hover:text-red-500 transition-colors"
+                  title="حذف المجلد"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <h3 className="text-lg font-bold mb-2 group-hover:text-emerald-600 transition-colors">{session.sessionName || session.examTitle}</h3>
+            <div className="flex items-center gap-4 text-xs text-stone-500">
+              <span className="flex items-center gap-1">
+                <Users className="w-3.5 h-3.5" /> 
+                {session.studentCount === 1 ? 'طالب واحد' : 
+                 session.studentCount === 2 ? 'طالبان' : 
+                 session.studentCount <= 10 ? `${session.studentCount} طلاب` :
+                 `${session.studentCount} طالب`}
+              </span>
+              <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {session.createdAt?.toDate().toLocaleDateString('ar-EG')}</span>
+            </div>
+            <div className="mt-6 pt-4 border-t border-stone-50 flex items-center justify-between text-xs font-bold text-emerald-600 transition-all group-hover:bg-emerald-50/50 rounded-xl px-2">
+              <span className="flex items-center gap-2">عرض تفاصيل المجموعة</span>
+              <ArrowRight className="w-4 h-4 rotate-180 transition-transform group-hover:translate-x-1" />
+            </div>
+          </div>
+        ))}
+        {filteredSessions.length === 0 && (
+          <div className="col-span-full py-20 text-center bg-white rounded-3xl border-2 border-dashed border-stone-200">
+            <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FolderOpen className="w-8 h-8 text-stone-300" />
+            </div>
+            <p className="text-stone-400">لا توجد مجموعات تصحيح مطابقة للبحث.</p>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
