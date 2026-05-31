@@ -278,23 +278,67 @@ PART A — TRANSCRIBE (copy the ink, do not solve):
    Do not confuse this with the question number or with a measurement unit (e.g. م², سم³).
 6. Report "numeralSystem": "arabic" or "western".
 
-PART B — JUDGE BY READING THE RESULT FIRST, THEN ASKING (think in WORDS):
-This is the key method. For each step the student wrote as "A op B = R":
-  - FIRST read the RESULT R the student wrote — before computing anything.
-  - THEN ask yourself an honest Arabic question: does R come from A op B?
-  Examples:
-    student wrote "٥ × ٧ = ٣٥" → ask: "هل خمسة وثلاثون ناتج من خمسة ضرب سبعة؟" → نعم → this step OK.
-    student wrote "٥ × ٧ = ٣٠" → ask: "هل ثلاثون ناتج من خمسة ضرب سبعة؟" → لا (الناتج خمسة وثلاثون) → this step WRONG.
-    student wrote "(-٧٥) ÷ ٥ = -١٥" → ask: "هل سالب خمسة عشر ناتج من سالب خمسة وسبعين قسمة خمسة؟" → نعم → OK.
-    student wrote "٣ × (-١٧) = -١٤" → ask: "هل سالب اربعة عشر ناتج من ثلاثة ضرب سالب سبعة عشر؟" → لا (الناتج -51) → WRONG.
-  Respect order of operations (× ÷ before + −) and parentheses.
-  Do this for EVERY step, including chains a = b = c.
+PART B — JUDGE BY READING THE RESULT FIRST, THEN ASKING (the core method, think in WORDS):
+For each step the student wrote as "LEFT = RIGHT":
+  - FIRST read the RIGHT side (the result the student wrote) — before you compute anything yourself.
+  - THEN ask an honest Arabic question: does the RIGHT side truly come from the LEFT side?
+  - Answer it truthfully. If no → the step is WRONG. If yes → the step is OK.
+  This "read the answer first, then verify backward" order stops you from auto-completing.
+  Example: "٥ × ٧ = ٣٠" → "هل ثلاثون ناتج من خمسة ضرب سبعة؟" → لا (الناتج ٣٥) → WRONG.
+  Apply to EVERY step and every link in a chain a = b = c.
+
+GENERAL MATH RULES — apply whichever fit each question (these are universal, not tied to any one problem):
+
+RULE 1 — INTEGER ARITHMETIC & SIGNS (+ − × ÷):
+  Verify each result. Track signs carefully:
+   - negative × negative = positive; negative × positive = negative.
+   - negative ÷ negative = positive; negative ÷ positive = negative.
+   - subtracting a larger number from a smaller gives a negative.
+  Ask the sign too: "هل الإشارة صحيحة؟" e.g. "(-٧٥) ÷ ٥ = ١٥" is wrong because the sign must be negative.
+
+RULE 2 — ORDER OF OPERATIONS (priority): brackets → exponents/roots → × and ÷ (left to right) → + and − (left to right).
+  Example: "٣ + ٤ × ٢" must be 3+(4×2)=11, NOT (3+4)×2=14.
+
+RULE 3 — SOLVING EQUATIONS (a variable س/ص/ع/x with "="): moving a term across "=" FLIPS its sign;
+  a factor that multiplies one side becomes division on the other (and vice-versa).
+  A line can be arithmetically true yet WRONG if the transfer rule was broken.
+  Example: "س + ١٤ = ٢٧" → correct "س = ٢٧ - ١٤ = ١٣"; if student wrote "س = ٢٧ + ١٤ = ٤١" the
+  arithmetic ٢٧+١٤=٤١ is true on its own but the transfer was wrong → WRONG (model says ١٣).
+
+RULE 4 — FRACTIONS: 
+  - addition/subtraction needs a common denominator; "١/٢ + ١/٣ = ٢/٥" is WRONG (correct ٥/٦).
+  - multiplication multiplies numerators and denominators; division multiplies by the reciprocal.
+  - a fraction should be checked in lowest terms if the model is reduced (e.g. ٢/٤ = ١/٢).
+
+RULE 5 — EXPONENTS & ROOTS: "أُس" means repeated multiplication (٢³ = ٢×٢×٢ = ٨, not ٢×٣=٦).
+  Square root: "هل الجذر صحيح؟" √٩ = ٣ because ٣×٣ = ٩.
+
+RULE 6 — PERCENTAGES & RATIOS: a percent is out of 100 (٢٥٪ of ٨٠ = ٢٠). Check ratio simplification and proportions (cross-multiply).
+
+RULE 7 — DECIMALS & ROUNDING: align decimal places; check the student rounded as the question asked (e.g. to nearest whole / one decimal).
+
+RULE 8 — GEOMETRY / FORMULAS: if a formula is used (area, perimeter, volume, average/mean), check the right formula was used and the substitution is correct. Ignore the unit symbol (م²، سم³) when comparing the numeric value, but a correct answer should still carry a sensible unit.
+
+RULE 9 — WORD PROBLEMS & MULTI-PART: read what the question asks for. For multi-part answers, judge each required part; the final reported quantity must match the model's final quantity.
+
+RULE 10 — EQUIVALENT FORMS ARE ACCEPTED (method is free): different but valid methods, or equivalent forms (١/٢ = ٠٫٥ = ٥٠٪, or ٣٤-٦ reached directly vs via ١٧×٢-٦), are CORRECT as long as the FINAL value equals the model's final value. Do not punish a student for solving differently than the model.
 
 PART C — VERDICT for the whole question:
-  - If every step is OK AND the final result matches what the math requires → verdict = "correct".
-  - If the final result is wrong but the method/steps are reasonable → verdict = "partial".
-  - If a step is wrong in a way that breaks the solution → verdict = "wrong".
-  Use the printed MODEL ANSWER only as a reference for what the final value should be — NOT to overwrite the student's writing.
+  Decision order:
+  1. Compute/locate the FINAL value the question requires. Use the printed MODEL ANSWER as the
+     authority for the correct final value (it is typed and reliable).
+  2. Compare the student's FINAL result to that correct final value:
+       - equal  → the answer is on track.
+       - not equal → the answer is wrong overall, EVEN IF some individual lines were
+         arithmetically self-consistent (the moving-term sign error in RULE 3 is exactly this case).
+  3. Then set the verdict:
+       - every step OK AND final value matches model → verdict = "correct".
+       - final value does NOT match model, but the chosen method was reasonable and only a
+         minor slip occurred → verdict = "partial".
+       - final value wrong due to a broken rule (sign transfer, order of operations, wrong
+         operation) → verdict = "wrong".
+  NEVER overwrite the student's writing with the model answer. The model answer is ONLY a
+  reference for the correct final value.
 
 CRITICAL: DO NOT write the correct answer into studentAnswer or studentFinalResult.
 If the student's result is wrong, you MUST report their WRONG value as-is. Reporting a wrong value is SUCCESS.
