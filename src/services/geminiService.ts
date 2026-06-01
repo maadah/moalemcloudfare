@@ -23,91 +23,34 @@ export interface GradingResult {
   pageIndex?: number;
 }
 
-// ── API keys & model from Cloudflare environment variables ──────────────────
-// All keys are read at BUILD time (Vite inlines VITE_* vars). We try them in
-// order; if one fails (quota/invalid/503), we fall back to the next.
-const getApiKeys = (): string[] => {
-  const env: any = (import.meta as any).env || {};
-  const candidates = [
-    env.VITE_GEMINI_API_KEY,
-    env.VITE_GEMINI_API_KEY_2,
-    env.VITE_GEMINI_API_KEY_SECONDARY,
-  ];
-  // Keep only valid, unique, non-empty keys.
-  const keys = candidates
-    .map(k => (typeof k === 'string' ? k.trim() : ''))
-    .filter(k => k && k !== 'undefined');
-  return Array.from(new Set(keys));
-};
+// Initialize AI on client side as per instructions
+const getApiKey = () => {
+  // Try various common environment variable patterns for Vite/Netlify
+  const viteKey = import.meta.env?.VITE_GEMINI_API_KEY;
+  if (viteKey && viteKey !== 'undefined' && viteKey !== '') return viteKey.trim();
 
-const getModelName = (): string => {
-  const env: any = (import.meta as any).env || {};
-  const m = env.VITE_GEMINI_MODEL;
-  return (typeof m === 'string' && m.trim()) ? m.trim() : 'gemini-2.5-flash';
-};
-
-const getApiKeyErrorMessage = () =>
-  'مفتاح API غير مضبوط. يرجى التأكد من إضافة المفاتيح (VITE_GEMINI_API_KEY) في إعدادات البيئة (Environment Variables) في Cloudflare ثم إعادة النشر.';
-
-// Decide whether an error is worth retrying with a DIFFERENT key.
-const isRetryableKeyError = (err: any): boolean => {
-  const msg = String(err?.message || err || '').toLowerCase();
-  return (
-    msg.includes('api key') ||        // invalid / not found
-    msg.includes('api_key') ||
-    msg.includes('permission') ||
-    msg.includes('quota') ||          // quota exhausted
-    msg.includes('resource_exhausted') ||
-    msg.includes('429') ||            // rate limited
-    msg.includes('503') ||            // overloaded
-    msg.includes('overloaded') ||
-    msg.includes('unavailable')
-  );
-};
-
-// Central call: try each API key in turn until one succeeds.
-async function generateWithFallback(request: any): Promise<any> {
-  const keys = getApiKeys();
-  if (keys.length === 0) throw new Error(getApiKeyErrorMessage());
-
-  const model = getModelName();
-  let lastError: any = null;
-
-  for (let i = 0; i < keys.length; i++) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: keys[i] });
-      return await ai.models.generateContent({ model, ...request });
-    } catch (err) {
-      lastError = err;
-      console.warn(`API key #${i + 1} failed:`, String((err as any)?.message || err));
-      // Only move to the next key if the error is key/quota/availability related.
-      if (!isRetryableKeyError(err)) break;
-    }
+  // Fallback to process.env if available (usually during dev or if polyfilled)
+  try {
+    const envKey = process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY;
+    if (envKey && envKey !== 'undefined' && envKey !== '') return envKey.trim();
+  } catch (e) {
+    // process might not be defined in browser
   }
-  throw lastError || new Error('فشل الاتصال بخدمة الذكاء الاصطناعي.');
-}
+  
+  return (localStorage.getItem('GEMINI_API_KEY_FALLBACK') || '').trim();
+};
 
-const cleanJson = (text: string): string => {
-  if (!text) return '{}';
-
-  // Strip markdown code fences
-  let t = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-
-  // Walk forward from first '{' matching braces to find the real JSON end
-  const start = t.indexOf('{');
-  if (start === -1) return '{}';
-
-  let depth = 0;
-  let end = -1;
-  for (let i = start; i < t.length; i++) {
-    if (t[i] === '{') depth++;
-    else if (t[i] === '}') {
-      depth--;
-      if (depth === 0) { end = i; break; }
-    }
+const getApiKeyErrorMessage = () => {
+  const isNetlify = window.location.hostname.includes('netlify.app');
+  if (isNetlify) {
+    return 'مفتاح API غير مضبوط. إذا كنت تستخدم Netlify، تأكد من إضافة المفتاح باسم VITE_GEMINI_API_KEY في إعدادات البيئة (Environment Variables). يمكنك أيضاً إدخاله يدوياً من أيقونة الإعدادات (⚙️) في الأعلى.';
   }
+  return 'مفتاح API غير مضبوط. يرجى الضغط على أيقونة الترس (⚙️) في الأعلى وإدخال مفتاح Gemini API للمتابعة.';
+};
 
-  return end === -1 ? t.slice(start) : t.slice(start, end + 1);
+const cleanJson = (text: string) => {
+  const match = text.match(/\{[\s\S]*\}/);
+  return match ? match[0] : text;
 };
 
 export async function extractExamFromDualImages(
@@ -115,6 +58,9 @@ export async function extractExamFromDualImages(
   answerImages: string[]
 ): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error(getApiKeyErrorMessage());
+    const ai = new GoogleGenAI({ apiKey });
 
     const qImagesData = await Promise.all(questionImages.map(async (base64) => {
       return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
@@ -145,7 +91,8 @@ export async function extractExamFromDualImages(
     aImagesData.forEach((data) => parts.push({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
-    const response = await generateWithFallback({
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
@@ -168,6 +115,9 @@ export async function extractExamFromDualImages(
 
 export async function extractExamFromImages(base64Images: string[]): Promise<{ title: string, questions: Question[], requiredQuestionsCount?: number }> {
   try {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error(getApiKeyErrorMessage());
+    const ai = new GoogleGenAI({ apiKey });
 
     const imagesData = await Promise.all(base64Images.map(async (base64) => {
       return await compressImage(base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`, 1500, 1500, 0.7);
@@ -189,7 +139,8 @@ export async function extractExamFromImages(base64Images: string[]): Promise<{ t
     const parts: any[] = imagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
 
-    const response = await generateWithFallback({
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
@@ -219,12 +170,15 @@ export async function gradeStudentPaper(
   onProgress?: (current: number, total: number, phase: 'compressing' | 'grading') => void
 ): Promise<{ results: { studentName: string; gradings: GradingResult[]; totalGrade: number }[] }> {
   try {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error(getApiKeyErrorMessage());
+    const ai = new GoogleGenAI({ apiKey });
 
     if (onProgress) onProgress(0, imageUrls.length, 'compressing');
-
+    
     const base64ImagesData: string[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
-      const compressed = await compressImage(imageUrls[i], 1600, 1600, 0.75);
+      const compressed = await compressImage(imageUrls[i], 2000, 2000, 0.85);
       base64ImagesData.push(compressed);
       if (onProgress) onProgress(i + 1, imageUrls.length, 'compressing');
     }
@@ -236,6 +190,7 @@ export async function gradeStudentPaper(
         if (label.length > 15 || label.length === 0) label = `سؤال ${index + 1}`;
         const fullPath = path ? `${path} / ${label}` : label;
         const combinedText = parentText ? `${parentText} - ${q.text}` : q.text;
+        
         if (!q.subQuestions || q.subQuestions.length === 0) {
           flattenedQuestions.push({ id: q.id, label: fullPath, text: combinedText, answer: q.answer, grade: q.grade, type: q.type });
         } else {
@@ -246,378 +201,126 @@ export async function gradeStudentPaper(
     flatten(questions);
 
     if (onProgress) onProgress(0, 100, 'grading');
+    
+    // 1. فحص واكتشاف مادة الرياضيات تلقائياً
+    const isMath = subject.includes('رياضيات') || 
+                   subject.toLowerCase().includes('math') || 
+                   subject.includes('الرياضيات');
 
-    // Note: question type (numeric vs textual) is now auto-detected by the AI
-    // PER QUESTION inside the prompt, so we no longer branch on the subject.
+    let prompt = "";
+    let systemInstruction = "";
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // CALL 1 — TRANSCRIPTION ONLY (images → Western digits, no answers given)
-    // The model does NOT see model answers. Its only job is to copy what it
-    // sees on the paper and convert Arabic/Hindi digits to Western digits.
-    // No judgment, no math, no context that could trigger auto-correction.
-    // ═══════════════════════════════════════════════════════════════════════
+    if (isMath) {
+      // ==========================================
+      // استراتيجية الرياضيات المتقدمة المقترحة (الناتج أولاً كبوابة عبور + فحص التعويض العكسي)
+      // ==========================================
+      prompt = `Perform a TWO-PHASE MATHEMATICAL AUDIT on the student's paper against the MODEL ANSWER.
+    
+      Current Subject: ${subject}.
+      Questions to grade (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}. 
+      Total Exam Max Grade: ${totalExamGrade}. 
+      Required Questions Count: ${requiredQuestionsCount || 'All'}. 
+      
+      GATEWAY GRADING RULE (CRITICAL):
+      - PHASE 1 (The Final Answer Gate): Look ONLY at the final boxed, circled, or definitive result of the student for each question. Compare it to the Model Answer's final result.
+        * If they MATCH exactly (e.g., Model is 13 and Student final result is 13), STOP THINKING. Award FULL GRADE immediately. Do not over-analyze steps or hallucinate errors.
+        * If they DO NOT MATCH (e.g., Model is 13, but Student final result is 17 or 11), you MUST proceed to PHASE 2.
+      
+      - PHASE 2 (Deep Substitution Check & Reverse Verification): 
+        * Since the final answer is wrong, dissect the student's steps character by character.
+        * Check for "Substitution Errors": Did the student swap numbers or transfer them incorrectly from the main question? (e.g., writing 3×2+5 instead of 3+2×5). If they changed the positions of numbers, this is a fatal substitution error.
+        * Apply a reverse consistency check to find exactly which sub-operation or priority step (PEMDAS/BODMAS) broke down.
+      
+      CRITICAL GRADING RULES:
+      1. EXHAUSTIVE SEARCH: Grade every visible mark individually.
+      2. PEDANTIC LITERAL OCR: In the 'studentAnswer' field, you MUST act as a Literal OCR Robot. Transcribe EXACTLY what is written on the paper, character by character (e.g., if they wrote "3×2+5=17", transcribe "3×2+5=17"). Do not let math logic auto-correct your transcription.
+      3. COORDINATES: Provide the 'box' [ymin, xmin, ymax, xmax] precisely.
+      4. JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.`;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // SINGLE CALL — Self-comparison approach
-    // The model receives the question, sees the student paper, and must:
-    //   1. Copy the student answer exactly as written (with digit conversion)
-    //   2. Solve the question ITSELF independently
-    //   3. Compare ITS OWN answer with the student's copied answer
-    // This way the comparison is between two things the model computed
-    // in the same context, making it much harder to "auto-correct" the
-    // student's answer without noticing the discrepancy.
-    // ═══════════════════════════════════════════════════════════════════════
+      systemInstruction = `أنت مصحح رياضيات خوارزمي صارم وعالي الدقة يعمل على مرحلتين شرطيتين:
+      المرحلة الأولى (بوابة الناتج النهائي): اذهب مباشرة إلى الناتج النهائي الذي كتبه الطالب للمسألة. إذا كان مطابقاً تماماً للجواب النموذجي المرفق، اعتبر الإجابة صحيحة تماماً وأعطه الدرجة كاملة (Full Grade) وتخطى تدقيق الخطوات تماماً لحمايتك وحماية الطالب من الهلوسة البصرية الحرفية.
+      
+      المرحلة الثانية (التشريح والتدقيق العكسي): إذا كان الناتج النهائي خاطئاً أو غير متطابق، هنا فقط تبدأ بالتدقيق السطري:
+      1) انقل ما كتبه الطالب في حقل "studentAnswer" بحرفية تامة دون أي تعديل (حتى لو كان خطأ حسابياً).
+      2) ابحث عن "خطأ التعويض" (Substitution Error): هل نقل الطالب الأرقام بشكل خاطئ أو عكس أماكنها بالمعادلة؟ حدد هذا في التعليق واخصم بناءً عليه.
+      3) تتبع ترتيب العمليات سطر بوسطر عبر سؤال عكسي: "هل هذا السطر هو النتيجة المنطقية للسطر الذي قبله؟" لتحديد أول خطوة تعثر فيها الطالب.
+      4) اكتب الـ feedback باللغة العربية الفصحى بأسلوب تربوي عراقي واضح يوضح سبب خصم الدرجة (الناتج، التعويض، أو الخطوات).`;
 
-    // Secret watermark appended to every model answer. The student cannot write
-    // this by hand, so if it appears in the transcribed student answer, the AI
-    // copied the model answer instead of reading the student's ink.
-    const COPY_MARKER = '\u00A5\u00A5'; // ¥¥
+    } else {
+      // ==========================================
+      // النسخة الأصلية المستقرة الخاصة بك للمواد النصية الأخرى
+      // ==========================================
+      prompt = `Perform a RIGOROUS COMPARATIVE AUDIT of the student's paper against the MODEL ANSWER.
+    
+      Current Subject: ${subject}.
+      Questions to grade (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}. 
+      Total Exam Max Grade: ${totalExamGrade}. 
+      Required Questions Count: ${requiredQuestionsCount || 'All'}. 
+      
+      MENTAL PROCEDURE FOR GRADING (DO THIS INTERNALLY FOR EVERY QUESTION):
+      1. Identify Question: Find the student's handwritten answer for a question in the images.
+      2. Read Model Answer: Carefully read the 'answer' provided in the JSON for this question. 
+      3. COMPARE: Match student result with model answer result.
+      
+      GRADING STANDARDS:
+      1. FACTUAL ACCURACY: Compare student answers precisely with the MODEL ANSWER.
+      2. KEYWORDS: Check for essential concepts.
+      3. LOGICAL STEPS: The process must align with the model answer's logic.
+      
+      CRITICAL GRADING RULES:
+      1. EXHAUSTIVE SEARCH: Grade every visible mark individually.
+      2. PEDANTIC LITERAL OCR (ZERO INFERENCE): In the 'studentAnswer' field, you MUST act as a Literal OCR Robot. 
+         - Transcribe EXACTLY what is written, character by character. 
+         - DO NOT use math logic to "correct" the student's transcription.
+         - PRIORTIZE BOXED TEXT: If a student has drawn a box or circle around a number, that number is the student's definitive answer and MUST be transcribed exactly.
+         - Transcribe Arabic/Hindi numerals (٠-٩) and symbols (=, -, +, ×, ÷) with absolute fidelity to the ink on the paper.
+      3. COORDINATES: Provide the 'box' [ymin, xmin, ymax, xmax] precisely.
+      4. JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.`;
 
-    const questionsForPrompt = flattenedQuestions.map(q => ({
-      id: q.id,
-      label: q.label,
-      questionText: q.text,
-      modelAnswer: (q.answer ? String(q.answer) + ' ' + COPY_MARKER : q.answer),
-      maxGrade: q.grade
-    }));
-
-    const singlePrompt = `You are reading what a student WROTE on their exam paper. You are NOT solving the exam.
-
-The QUESTION TEXT and MODEL ANSWER below are PRINTED (typed) and are given ONLY to help you understand context — for example, to tell whether a handwritten mark is an Arabic LETTER (like ح، س، ع، ص) used as a variable, or an Arabic DIGIT. They are NOT the student answer and must NEVER be copied as the student answer.
-
-Questions (printed context):
-${JSON.stringify(questionsForPrompt)}
-
-CRITICAL RULE — KEEP THE STUDENT'S OWN NUMERAL SYSTEM (do NOT convert):
-  If the student writes Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩), transcribe with THOSE SAME Arabic-Indic digits.
-  If the student writes Western digits (0123456789), transcribe with Western digits.
-  NEVER convert ٤ into 4 or ٥ into 5. Converting between systems is what causes reading errors,
-  because ٤ visually resembles Western 5. Staying in the student's own system avoids the confusion.
-
-DIGIT vs LETTER DISAMBIGUATION (still important):
-  Some Arabic LETTERS resemble Arabic digits:
-    ح (letter Haa) resembles ٢. If the printed question/model uses ح as a variable, read that mark as the LETTER ح, not ٢.
-    ع (letter Ain) resembles ٤. If the formula uses ع as a symbol (e.g. height), read it as ع, not ٤.
-  Use the printed question/model to decide: variable position → letter; number position → digit.
-
-YOUR TASK — for each question:
-
-PART A — TRANSCRIBE (copy the ink, do not solve):
-1. Look ONLY at the student's handwritten ink.
-2. Ignore any leading question number such as "٣)" or "ج٣)" — that is the QUESTION NUMBER, not part of the math.
-3. Transcribe EVERY working line in the SAME numeral system the student used, joined by " | ".
-4. Put the full transcription in "studentAnswer".
-5. Put ONLY the student's FINAL result (the value after the last "=") in "studentFinalResult".
-   Do not confuse this with the question number or with a measurement unit (e.g. م², سم³).
-6. Report "numeralSystem": "arabic" or "western".
-
-7. FRACTIONS: copy each fraction exactly as written — numerator on top, denominator on the bottom.
-   Keep the student's operators (× stays ×, ÷ stays ÷). Do not flip a fraction and do not change a
-   multiplication into a reciprocal unless the student actually wrote ÷.
-
-8. MULTI-DIGIT NUMBERS: copy every number with all its digits in their written order; do not drop a
-   digit or merge it with an adjacent symbol.
-
-9. EMPTY / UNANSWERED QUESTIONS (very important):
-   If the student wrote NOTHING for a question (no handwritten ink in its answer area), you MUST set
-   studentAnswer to "" (empty), studentFinalResult to "", and verdict to "wrong". NEVER write a
-   solution, NEVER solve it yourself, and NEVER copy the model answer for a blank question. An empty
-   answer earns zero. Inventing or solving an answer the student did not write is a serious error.
-
-*** ANTI-COPY WARNING (very important) ***
-  The MODEL ANSWER is printed in the data above. You must NEVER copy it into studentAnswer.
-  The student's handwriting is messy and often DIFFERENT from the model. If the student's
-  handwriting happens to come out IDENTICAL to the model answer, you are probably copying the
-  model by mistake — re-read the ink and report what is ACTUALLY written, including any messy,
-  wrong, or incomplete steps.
-  If the handwriting is genuinely unreadable, set studentAnswer to what you can see plus "?"
-  for unclear parts, set "unreadable": true, and do NOT fill it in from the model answer.
-  Reporting a messy/wrong/partial transcription is correct behavior. Substituting the clean
-  model answer is a serious error.
-
-PART B — FIRST DECIDE THE QUESTION TYPE, THEN JUDGE ACCORDINGLY:
-
-For EACH question, first look at the MODEL ANSWER and the student's answer and decide the type:
-
-  TYPE 1 — NUMERIC/CALCULATION (the answer is a number or a math expression with a final value,
-           e.g. arithmetic, equations, fractions, physics/chemistry calculations):
-           → Judge by the FINAL RESULT (see PART C). Use the math rules below as needed.
-
-  TYPE 2 — TEXTUAL/CONCEPTUAL (the answer is a definition, explanation, law statement, reason,
-           list of terms, translation, grammar, essay — common in biology, chemistry theory,
-           islamic studies, arabic/english, and "define/explain/why" questions):
-           → Do NOT look for a numeric "final result". Instead compare MEANING:
-              * Does the student's answer contain the essential facts / keywords / concepts that
-                the MODEL ANSWER requires?
-              * Full marks if the core meaning matches (wording may differ — accept paraphrases
-                and synonyms). Partial credit if some required points are present and others missing.
-              * Zero only if blank, irrelevant, or fundamentally wrong.
-           → For TYPE 2, set "verdict" to "correct" if the essential meaning is present, "wrong"
-             if it is absent. If only some required points are present, set verdict "correct" and
-             reflect the partial nature in feedback (or use the AI grade field for finer control).
-
-The math method below applies ONLY to TYPE 1 questions:
-
-CORE METHOD FOR TYPE 1 — READ THE RESULT FIRST, THEN ASK (think in WORDS):
-For each step the student wrote as "LEFT = RIGHT":
-  - FIRST read the RIGHT side (the result the student wrote) — before you compute anything yourself.
-  - THEN ask an honest Arabic question: does the RIGHT side truly come from the LEFT side?
-  - Answer it truthfully. If no → the step is WRONG. If yes → the step is OK.
-  This "read the answer first, then verify backward" order stops you from auto-completing.
-  Example: "٥ × ٧ = ٣٠" → "هل ثلاثون ناتج من خمسة ضرب سبعة؟" → لا (الناتج ٣٥) → WRONG.
-  Apply to EVERY step and every link in a chain a = b = c.
-
-  *** A RESULT HAS TWO PARTS: THE NUMBER (magnitude) AND THE SIGN. BOTH must be correct. ***
-  A correct sign with a wrong number is STILL WRONG. A correct number with a wrong sign is STILL WRONG.
-  Do NOT say "the sign is right so it is correct" — you must ALSO check the number itself.
-  Example: "٣ × (-٥) = -٢٠" → the sign is negative (correct direction), BUT the NUMBER is wrong:
-    "هل عشرون ناتج من ثلاثة ضرب خمسة؟" → لا (الناتج ١٥). So -٢٠ ≠ -١٥ → WRONG.
-  Always verify the digits, never approve a step just because the sign matches.
-
-GENERAL MATH RULES — apply whichever fit each question (these are universal, not tied to any one problem):
-
-RULE 1 — INTEGER ARITHMETIC & SIGNS (+ − × ÷):
-  Verify the NUMBER and the SIGN as TWO SEPARATE checks — both must pass.
-  Sign rules: negative × negative = positive; negative × positive = negative;
-              negative ÷ negative = positive; negative ÷ positive = negative;
-              subtracting a larger number from a smaller gives a negative.
-  Check 1 (number): does the magnitude match? e.g. ٣ × ٥ must give 15 — not 20, not 10.
-  Check 2 (sign):   is the sign right? e.g. (-٧٥) ÷ ٥ must be negative.
-  A step is correct ONLY if BOTH checks pass. Examples of WRONG steps:
-   - "٣ × (-٥) = -٢٠" → sign correct but number wrong (should be -١٥) → WRONG.
-   - "٣ × (-٥) = ١٥"  → number correct but sign wrong (should be -١٥) → WRONG.
-   - "(-٧٥) ÷ ٥ = ١٥" → number correct but sign wrong (should be -١٥) → WRONG.
-  NEVER approve a step merely because the sign direction looks right.
-
-RULE 2 — ORDER OF OPERATIONS (priority): brackets → exponents/roots → × and ÷ (left to right) → + and − (left to right).
-  Example: "٣ + ٤ × ٢" must be 3+(4×2)=11, NOT (3+4)×2=14.
-
-RULE 3 — SOLVING EQUATIONS (a variable س/ص/ع/x with "="): moving a term across "=" FLIPS its sign;
-  a factor that multiplies one side becomes division on the other (and vice-versa).
-  A line can be arithmetically true yet WRONG if the transfer rule was broken.
-  Example: "س + ١٤ = ٢٧" → correct "س = ٢٧ - ١٤ = ١٣"; if student wrote "س = ٢٧ + ١٤ = ٤١" the
-  arithmetic ٢٧+١٤=٤١ is true on its own but the transfer was wrong → WRONG (model says ١٣).
-
-RULE 4 — FRACTIONS: read each fraction as written (top/bottom) and trust the ink — most "reciprocal"
-  errors come from the reader flipping a fraction, not the student. Add/subtract needs a common
-  denominator; multiply across numerators and denominators; compare in lowest terms when the model is
-  reduced. Only treat a fraction as a reciprocal if the student actually wrote ÷.
-
-RULE 5 — EXPONENTS & ROOTS: "أُس" means repeated multiplication (٢³ = ٢×٢×٢ = ٨, not ٢×٣=٦).
-  Square root: "هل الجذر صحيح؟" √٩ = ٣ because ٣×٣ = ٩.
-
-RULE 6 — PERCENTAGES & RATIOS: a percent is out of 100 (٢٥٪ of ٨٠ = ٢٠). Check ratio simplification and proportions (cross-multiply).
-
-RULE 7 — DECIMALS & ROUNDING: align decimal places; check the student rounded as the question asked (e.g. to nearest whole / one decimal).
-
-RULE 8 — GEOMETRY / FORMULAS: if a formula is used (area, perimeter, volume, average/mean), check the right formula was used and the substitution is correct. Ignore the unit symbol (م²، سم³) when comparing the numeric value, but a correct answer should still carry a sensible unit.
-
-RULE 9 — WORD PROBLEMS & MULTI-PART: read what the question asks for. For multi-part answers, judge each required part; the final reported quantity must match the model's final quantity.
-
-RULE 10 — EQUIVALENT FORMS ARE ACCEPTED (method is free): different but valid methods, or equivalent forms (١/٢ = ٠٫٥ = ٥٠٪, or ٣٤-٦ reached directly vs via ١٧×٢-٦), are CORRECT as long as the FINAL value equals the model's final value. Do not punish a student for solving differently than the model.
-
-PART C — DECIDING THE VERDICT (think slowly, accuracy over speed):
-
-  FOR TYPE 1 (NUMERIC) QUESTIONS — verify the FINAL RESULT:
-  STEP 1 — LOCATE the student's final result (the value at the END of the last line, after last "=").
-           Ignore the intermediate working — only the final value matters.
-  STEP 2 — READ the student's final value digit by digit, then SAY IT IN WORDS to be sure.
-           e.g. if you see ٢١, read "٢ ثم ١" → "واحد وعشرون" = 21. If you see ٢, it is "اثنان" = 2.
-  STEP 3 — READ the model answer's final value the same way, in words.
-  STEP 4 — COMPARE the two values (not their surface text). Accept equivalent forms
-           (١/٢ = ٠٫٥ = ٥٠٪، أو ٢/٤ = ١/٢). Ignore unit symbols (م²، سم³) when comparing the number.
-  STEP 5 — verdict: same value → "correct"; different → "wrong"; blank → "wrong".
-           Do NOT analyze every intermediate line — that causes inconsistency.
-
-  FOR TYPE 2 (TEXTUAL/CONCEPTUAL) QUESTIONS — compare MEANING with the model answer:
-  STEP 1 — Read the student's written answer (definition / explanation / law / list / translation).
-  STEP 2 — Read the model answer and identify its essential points / keywords / concepts.
-  STEP 3 — Check how many essential points the student covered (wording may differ; accept
-           paraphrases, synonyms, and different but correct phrasing).
-  STEP 4 — verdict: essential meaning present → "correct"; absent/irrelevant/blank → "wrong".
-           If only SOME required points are present, set "verdict":"correct" and put a number in
-           "grade" between 0 and maxGrade reflecting how much was covered (round to whole number).
-
-  Be deliberate and consistent: the same paper must always give the same result.
-  NEVER overwrite the student's writing with the model answer. The model answer is ONLY a reference.
-
-CRITICAL: DO NOT write the correct answer into studentAnswer or studentFinalResult.
-If the student's result is wrong, you MUST report their WRONG value as-is. Reporting a wrong value is SUCCESS.
-
-Output JSON only:
-{
-  "studentName": "name from paper or طالب",
-  "gradings": [
-    {
-      "questionId": "id",
-      "studentAnswer": "<exact handwriting transcription, student's numeral system, steps joined by ' | ', WITHOUT the question number>",
-      "studentFinalResult": "<for TYPE 1: the student's final result only. For TYPE 2: leave empty>",
-      "numeralSystem": "arabic or western",
-      "questionType": "numeric or textual",
-      "unreadable": false,
-      "verdict": "correct | wrong",
-      "grade": <optional number 0..maxGrade for partial textual credit; omit if full/zero>,
-      "feedback": "<Arabic: for numeric say the student's final value vs the correct one; for textual say which points were right/missing>",
-      "box": [ymin, xmin, ymax, xmax],
-      "pageIndex": <0-based>
+      systemInstruction = "أنت معلم محترف وروبوت استخراج نصوص حرفي. يجب استخراج إجابة الطالب بدقة كما هي مكتوبة تماماً. اعتمد سياسة تصحيح مرنة؛ إذا كانت الإجابة قريبة من الصواب أو تعبر عن فهم الموضوع، اخصم درجة بسيطة فقط. يجب أن تكون الملاحظات والتعليقات (feedback) باللغة العربية الفصحى دائماً.";
     }
-  ]
-}`;
 
-    const singleParts: any[] = base64ImagesData.map(d => ({ inlineData: { data: d, mimeType: "image/jpeg" } }));
-    singleParts.push({ text: singlePrompt });
+    const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
+    parts.push({ text: prompt });
 
-    const singleResponse = await generateWithFallback({
-      contents: { parts: singleParts },
-      config: {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: { parts },
+      config: { 
         responseMimeType: "application/json",
-        temperature: 0,
-        systemInstruction: "أنت تقرأ ما كتبه الطالب بخط يده على ورقة الامتحان. أنت لا تحل الامتحان. قاعدة مهمة: ابقَ في نظام الأرقام الذي استخدمه الطالب؛ إذا كتب بالأرقام العربية ٠١٢٣٤٥٦٧٨٩ فانسخ بالعربية نفسها ولا تحوّلها إلى إنجليزية، وإذا كتب بالإنجليزية فابقَ بالإنجليزية، لأن التحويل سبب الخطأ (٤ تشبه 5 الإنجليزية). انسخ كل أسطر حل الطالب بالكامل وافصل بينها بـ ' | '. السؤال والنموذج المطبوعان يساعدانك فقط على تمييز الحروف (ح تشبه ٢، ع تشبه ٤) عن الأرقام. انسخ ما يظهره خط الطالب بالضبط حتى لو كان خطأً؛ نقل القيمة الخاطئة نجاح وليس فشلاً، ولا تضع النتيجة الصحيحة أبداً. عند الحكم: الناتج له جزآن، الرقم والإشارة، وكلاهما يجب أن يكون صحيحاً. لا تقبل ناتجاً لمجرد أن إشارته صحيحة؛ تحقق من الرقم نفسه أيضاً. مثال: ٣×(-٥)=-٢٠ إشارته سالبة صحيحة لكن الرقم خطأ (الصحيح -١٥) فهو خاطئ. عند قراءة الكسور: البسط فوق والمقام تحت، انسخها كما هي (فوق/تحت) ولا تقلبها أبداً، ولا تفترض أن الطالب ضرب بالمقلوب إلا إذا كتب علامة قسمة ÷ صراحةً. عند قراءة الأرقام متعددة الخانات اقرأها بترتيبها الطبيعي ولا تعكسها: ٢١ تبقى ٢١ (واحد وعشرون) ولا تقرأها ١٢، والتقط كل خانات الناتج النهائي دون أن تندمج خانة مع كسر أو رمز مجاور."
+        temperature: 0, // صفر للحفاظ على دقة مطابقة تامة
+        systemInstruction: systemInstruction
       }
     });
 
-    let singleData: any = { gradings: [], studentName: 'طالب غير معروف' };
-    try {
-      singleData = JSON.parse(cleanJson(singleResponse.text || '{}'));
-    } catch(e) {
-      console.error("Parse error:", e, "\nRaw:", singleResponse.text?.slice(0, 400));
-    }
+    const data = JSON.parse(cleanJson(response.text || '{}'));
 
     if (onProgress) onProgress(100, 100, 'grading');
 
-    const studentName: string = singleData.studentName || 'طالب غير معروف';
-    const rawGradings: any[] = singleData.gradings || [];
+    // Flatten results if model outputted directly to 'gradings'
+    const results = data.results || (data.gradings ? [{ studentName: data.studentName || 'طالب غير معروف', gradings: data.gradings, totalGrade: data.totalGrade }] : []);
 
-    const finalGradings = rawGradings.map((g: any) => {
-      const q = flattenedQuestions.find(fq => fq.id === g.questionId);
-      const maxGrade = g.maxGrade || q?.grade || 0;
-      let studentAnswer = g.studentAnswer || '';
-
-      // ── Secret-marker copy detection (most reliable) ─────────────────────
-      // We appended ¥¥ to the model answer the AI saw. A student cannot write
-      // ¥¥ by hand. If it shows up in the transcription, the AI copied the
-      // model answer. Detect it, then strip it from all visible fields.
-      const markerCopied =
-        studentAnswer.includes(COPY_MARKER) ||
-        String(g.studentFinalResult || '').includes(COPY_MARKER);
-      // Strip the marker (and any stray ¥) from anything we will display.
-      const stripMarker = (s: string) => String(s || '').split(COPY_MARKER).join('').replace(/\u00A5/g, '').trim();
-      studentAnswer = stripMarker(studentAnswer);
-      if (g.studentFinalResult) g.studentFinalResult = stripMarker(g.studentFinalResult);
-
-      // ── Grade by comparing the FINAL result to the model answer ──────────
-      // Simple and stable: the AI returns a verdict based only on whether the
-      // student's FINAL result equals the model's FINAL result.
-      //   correct → full marks
-      //   wrong   → zero
-      // No step-by-step ratio (that caused instability with fractions and
-      // order-of-operations). Free-text questions fall back to the AI grade.
-      const verdict = String(g.verdict || '').toLowerCase();
-
-      // Safety net: a blank/empty student answer ALWAYS scores 0, no matter
-      // what verdict or grade the AI returned. This prevents the AI from
-      // inventing or copying a solution for a question the student left empty.
-      const isBlank = !studentAnswer || !studentAnswer.replace(/[\s?]/g, '').trim() || /^BLANK$/i.test(studentAnswer.trim());
-
-      let grade: number;
-      if (isBlank) {
-        grade = 0;
-      } else if (verdict === 'correct') {
-        // Full marks by default. For TYPE 2 (textual) the AI may provide a
-        // partial 'grade' (some required points covered) — honor it if valid.
-        if (typeof g.grade === 'number' && isFinite(g.grade) && g.grade >= 0 && g.grade < maxGrade) {
-          grade = Math.round(g.grade);
-        } else {
-          grade = maxGrade;
-        }
-      } else if (verdict === 'wrong') {
-        grade = 0;
-      } else {
-        // No clear verdict (e.g. free-text essay). Use AI-provided grade if any.
-        grade = (typeof g.grade === 'number') ? Math.round(g.grade) : maxGrade;
-      }
-      // Safety clamp
-      grade = Math.max(0, Math.min(maxGrade, grade));
-
-      let feedback = g.feedback || '';
-      if (isBlank && !feedback) {
-        feedback = 'لم يجب الطالب على هذا السؤال.';
-      } else if (!feedback) {
-        if (verdict === 'correct') feedback = 'اجابة صحيحة.';
-        else if (verdict === 'wrong') feedback = 'اجابة خاطئة.';
-        else feedback = '';
-      }
-
-      // ── Copy-detection (two layers) ─────────────────────────────────────
-      // Layer 1 (definitive): the secret ¥¥ marker appeared → the AI copied the
-      // model answer for sure. Layer 2 (heuristic): the text is nearly identical
-      // to the model answer. Either way, flag for manual review.
-      const modelAns = q?.answer || '';
-      if (markerCopied) {
-        feedback = '\u26A0\uFE0F تحذير: تم اكتشاف نسخ الاجابة النموذجية بدل قراءة خط الطالب. يجب المراجعة اليدوية. ' + feedback;
-      } else if (modelAns && looksCopiedFromModel(studentAnswer, modelAns)) {
-        feedback = '\u26A0\uFE0F تحذير: قد يكون استخراج اجابة الطالب غير دقيق (تشبه الاجابة النموذجية كثيراً). يُرجى المراجعة اليدوية. ' + feedback;
-      }
-      if (g.unreadable === true) {
-        feedback = '\u26A0\uFE0F خط الطالب غير واضح للقراءة الالية، يُرجى المراجعة اليدوية. ' + feedback;
-      }
-
-      return {
-        questionId: g.questionId,
-        studentAnswer,
-        grade,
-        maxGrade,
-        feedback,
-        box: g.box || [0, 0, 0, 0],
-        pageIndex: g.pageIndex ?? 0
-      };
-    });
-
-    const computedTotal = finalGradings.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
-
-    return {
-      results: [{
-        studentName,
-        gradings: finalGradings,
-        totalGrade: computedTotal
-      }]
+    return { 
+      results: results.map((r: any) => {
+        const gradingsWithMax = (r.gradings || []).map((g: any) => ({
+          ...g,
+          maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
+        }));
+        
+        // Ensure total grade is calculated by summing individual question grades
+        const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
+        
+        return {
+          ...r,
+          gradings: gradingsWithMax,
+          totalGrade: computedTotal
+        };
+      })
     };
-
   } catch (error: any) {
     console.error("Grading error:", error);
     throw error;
   }
-}
-
-
-// Detect whether the transcribed student answer was likely COPIED from the
-// model answer (a known AI failure mode when handwriting is messy). We compare
-// after normalizing digits, spaces and operators. If they are essentially the
-// same string, it is suspicious and worth a manual-review flag.
-function looksCopiedFromModel(studentAnswer: string, modelAnswer: string): boolean {
-  const norm = (s: string) => {
-    const map: Record<string, string> = {
-      '\u0660':'0','\u0661':'1','\u0662':'2','\u0663':'3','\u0664':'4',
-      '\u0665':'5','\u0666':'6','\u0667':'7','\u0668':'8','\u0669':'9'
-    };
-    return s
-      .replace(/[\u0660-\u0669]/g, d => map[d] || d)
-      .replace(/[\u00D7]/g, '*').replace(/[\u00F7]/g, '/').replace(/[\u2212]/g, '-')
-      .replace(/[\s|]/g, '')           // drop spaces and the " | " separators
-      .replace(/["'.]/g, '')            // drop quotes/periods
-      .toLowerCase();
-  };
-  const a = norm(studentAnswer);
-  const b = norm(modelAnswer);
-  if (!a || !b) return false;
-  if (a.length < 4) return false;        // too short to judge
-  // Exact match after normalization, or one fully contains the other and they
-  // are nearly the same length → very likely a copy.
-  if (a === b) return true;
-  const longer = a.length >= b.length ? a : b;
-  const shorter = a.length >= b.length ? b : a;
-  if (longer.includes(shorter) && shorter.length / longer.length > 0.9) return true;
-  return false;
 }
 
 async function compressImage(url: string, maxWidth = 800, maxHeight = 800, quality = 0.5): Promise<string> {
@@ -656,4 +359,3 @@ function fixInlineSubQuestions(q: any, parentId?: string, level: number = 1): an
   }
   return { ...q, id };
 }
-
