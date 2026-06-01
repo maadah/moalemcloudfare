@@ -201,84 +201,66 @@ export async function gradeStudentPaper(
     flatten(questions);
 
     if (onProgress) onProgress(0, 100, 'grading');
+
+    // Secret watermark appended to every model answer the AI sees. A student
+    // cannot write ¥¥ by hand, so if it appears in the transcribed student
+    // answer, the AI copied the model answer instead of reading the ink.
+    const COPY_MARKER = '\u00A5\u00A5'; // ¥¥
+    const questionsForPrompt = flattenedQuestions.map(q => ({
+      ...q,
+      answer: q.answer ? String(q.answer) + ' ' + COPY_MARKER : q.answer
+    }));
+
+    const prompt = `Perform a RIGOROUS COMPARATIVE AUDIT of the student's paper against the MODEL ANSWER.
     
-    // 1. فحص واكتشاف مادة الرياضيات تلقائياً
-    const isMath = subject.includes('رياضيات') || 
-                   subject.toLowerCase().includes('math') || 
-                   subject.includes('الرياضيات');
-
-    let prompt = "";
-    let systemInstruction = "";
-
-    if (isMath) {
-      // ==========================================
-      // استراتيجية الرياضيات المتقدمة المقترحة (الناتج أولاً كبوابة عبور + فحص التعويض العكسي)
-      // ==========================================
-      prompt = `Perform a TWO-PHASE MATHEMATICAL AUDIT on the student's paper against the MODEL ANSWER.
+    Questions to grade (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(questionsForPrompt)}. 
+    Total Exam Max Grade: ${totalExamGrade}. 
+    Required Questions Count: ${requiredQuestionsCount || 'All'}. 
     
-      Current Subject: ${subject}.
-      Questions to grade (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}. 
-      Total Exam Max Grade: ${totalExamGrade}. 
-      Required Questions Count: ${requiredQuestionsCount || 'All'}. 
-      
-      GATEWAY GRADING RULE (CRITICAL):
-      - PHASE 1 (The Final Answer Gate): Look ONLY at the final boxed, circled, or definitive result of the student for each question. Compare it to the Model Answer's final result.
-        * If they MATCH exactly (e.g., Model is 13 and Student final result is 13), STOP THINKING. Award FULL GRADE immediately. Do not over-analyze steps or hallucinate errors.
-        * If they DO NOT MATCH (e.g., Model is 13, but Student final result is 17 or 11), you MUST proceed to PHASE 2.
-      
-      - PHASE 2 (Deep Substitution Check & Reverse Verification): 
-        * Since the final answer is wrong, dissect the student's steps character by character.
-        * Check for "Substitution Errors": Did the student swap numbers or transfer them incorrectly from the main question? (e.g., writing 3×2+5 instead of 3+2×5). If they changed the positions of numbers, this is a fatal substitution error.
-        * Apply a reverse consistency check to find exactly which sub-operation or priority step (PEMDAS/BODMAS) broke down.
-      
-      CRITICAL GRADING RULES:
-      1. EXHAUSTIVE SEARCH: Grade every visible mark individually.
-      2. PEDANTIC LITERAL OCR: In the 'studentAnswer' field, you MUST act as a Literal OCR Robot. Transcribe EXACTLY what is written on the paper, character by character (e.g., if they wrote "3×2+5=17", transcribe "3×2+5=17"). Do not let math logic auto-correct your transcription.
-      3. COORDINATES: Provide the 'box' [ymin, xmin, ymax, xmax] precisely.
-      4. JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.`;
+    STEP 0 — DETECT THE TYPE OF EACH QUESTION (do this per question, do NOT assume a single subject):
+      • TYPE NUMERIC: the answer is a number or a math expression with a final value (arithmetic,
+        equations, fractions, percentages, physics/chemistry calculations). → grade by the FINAL RESULT.
+      • TYPE TEXTUAL: the answer is a definition, explanation, law, reason, list, translation, grammar,
+        or essay (common in biology, chemistry theory, islamic studies, arabic/english, "define/explain"
+        questions). → grade by MEANING vs the model answer (keywords/concepts), accept paraphrases.
 
-      systemInstruction = `أنت مصحح رياضيات خوارزمي صارم وعالي الدقة يعمل على مرحلتين شرطيتين:
-      المرحلة الأولى (بوابة الناتج النهائي): اذهب مباشرة إلى الناتج النهائي الذي كتبه الطالب للمسألة. إذا كان مطابقاً تماماً للجواب النموذجي المرفق، اعتبر الإجابة صحيحة تماماً وأعطه الدرجة كاملة (Full Grade) وتخطى تدقيق الخطوات تماماً لحمايتك وحماية الطالب من الهلوسة البصرية الحرفية.
-      
-      المرحلة الثانية (التشريح والتدقيق العكسي): إذا كان الناتج النهائي خاطئاً أو غير متطابق، هنا فقط تبدأ بالتدقيق السطري:
-      1) انقل ما كتبه الطالب في حقل "studentAnswer" بحرفية تامة دون أي تعديل (حتى لو كان خطأ حسابياً).
-      2) ابحث عن "خطأ التعويض" (Substitution Error): هل نقل الطالب الأرقام بشكل خاطئ أو عكس أماكنها بالمعادلة؟ حدد هذا في التعليق واخصم بناءً عليه.
-      3) تتبع ترتيب العمليات سطر بوسطر عبر سؤال عكسي: "هل هذا السطر هو النتيجة المنطقية للسطر الذي قبله؟" لتحديد أول خطوة تعثر فيها الطالب.
-      4) اكتب الـ feedback باللغة العربية الفصحى بأسلوب تربوي عراقي واضح يوضح سبب خصم الدرجة (الناتج، التعويض، أو الخطوات).`;
+    MENTAL PROCEDURE (FOR EVERY QUESTION):
+    1. Find the student's handwritten answer in the images.
+    2. Read the model 'answer' from the JSON.
+    3. Apply the correct grading mode for the detected type (see below).
+    4. Compare and grade.
 
-    } else {
-      // ==========================================
-      // النسخة الأصلية المستقرة الخاصة بك للمواد النصية الأخرى
-      // ==========================================
-      prompt = `Perform a RIGOROUS COMPARATIVE AUDIT of the student's paper against the MODEL ANSWER.
+    ===== GRADING TYPE: NUMERIC (focus ONLY on the final result) =====
+    Do NOT analyze the intermediate steps. Look ONLY at the final result, with this exact method:
+    1. LOCATE the student's final result = the value written AFTER THE LAST "=" sign on the last line.
+       Ignore any leading question number (like "٣)") and ignore unit symbols (م²، سم³).
+    2. CONVERT the student's final result into Arabic WORDS, reading it carefully digit by digit,
+       INCLUDING its sign and any fraction/decimal:
+         ٢٥ → "خمسة وعشرون"   |   -١٥ → "سالب خمسة عشر"   |   ١/٢ → "واحد على اثنين"
+         ٢١ → "واحد وعشرون" (NOT "اثنا عشر") — read every digit in order, do not flip.
+    3. Take the model answer's FINAL number (the last number in the model 'answer') and convert it to
+       Arabic WORDS the same way.
+    4. COMPARE the two spoken-word values. Accept equivalent forms (١/٢ = ٠٫٥ = ٥٠٪).
+         - same value  → grade = full marks (maxGrade).
+         - different    → grade = 0.
+    There is no partial credit for numeric questions: the final result is either right (full) or wrong (zero).
+
+    ===== GRADING TYPE: TEXTUAL =====
+    1. FACTUAL ACCURACY: compare the student's meaning with the MODEL ANSWER.
+    2. KEYWORDS/CONCEPTS: check the essential points are present (wording may differ; accept paraphrases & synonyms).
+    3. PARTIAL CREDIT: full marks if the core meaning matches; partial grade if some required points are
+       present; zero only if blank, irrelevant, or fundamentally wrong.
     
-      Current Subject: ${subject}.
-      Questions to grade (TOTAL ${flattenedQuestions.length}): ${JSON.stringify(flattenedQuestions)}. 
-      Total Exam Max Grade: ${totalExamGrade}. 
-      Required Questions Count: ${requiredQuestionsCount || 'All'}. 
-      
-      MENTAL PROCEDURE FOR GRADING (DO THIS INTERNALLY FOR EVERY QUESTION):
-      1. Identify Question: Find the student's handwritten answer for a question in the images.
-      2. Read Model Answer: Carefully read the 'answer' provided in the JSON for this question. 
-      3. COMPARE: Match student result with model answer result.
-      
-      GRADING STANDARDS:
-      1. FACTUAL ACCURACY: Compare student answers precisely with the MODEL ANSWER.
-      2. KEYWORDS: Check for essential concepts.
-      3. LOGICAL STEPS: The process must align with the model answer's logic.
-      
-      CRITICAL GRADING RULES:
-      1. EXHAUSTIVE SEARCH: Grade every visible mark individually.
-      2. PEDANTIC LITERAL OCR (ZERO INFERENCE): In the 'studentAnswer' field, you MUST act as a Literal OCR Robot. 
-         - Transcribe EXACTLY what is written, character by character. 
-         - DO NOT use math logic to "correct" the student's transcription.
-         - PRIORTIZE BOXED TEXT: If a student has drawn a box or circle around a number, that number is the student's definitive answer and MUST be transcribed exactly.
-         - Transcribe Arabic/Hindi numerals (٠-٩) and symbols (=, -, +, ×, ÷) with absolute fidelity to the ink on the paper.
-      3. COORDINATES: Provide the 'box' [ymin, xmin, ymax, xmax] precisely.
-      4. JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.`;
-
-      systemInstruction = "أنت معلم محترف وروبوت استخراج نصوص حرفي. يجب استخراج إجابة الطالب بدقة كما هي مكتوبة تماماً. اعتمد سياسة تصحيح مرنة؛ إذا كانت الإجابة قريبة من الصواب أو تعبر عن فهم الموضوع، اخصم درجة بسيطة فقط. يجب أن تكون الملاحظات والتعليقات (feedback) باللغة العربية الفصحى دائماً.";
-    }
+    CRITICAL GRADING RULES (ALL TYPES):
+    1. EXHAUSTIVE SEARCH: grade every visible answer individually.
+    2. PEDANTIC LITERAL OCR (ZERO INFERENCE): in 'studentAnswer' act as a literal OCR robot. Transcribe
+       EXACTLY what is written, character by character, keeping the student's own Arabic/Western digits.
+       If the student wrote "68-", write "68-", even if the math suggests "28". DO NOT use logic to
+       "correct" the transcription. NEVER copy the model answer into studentAnswer. If a question is blank
+       (no ink), set studentAnswer "" and grade 0 — never invent or solve it.
+       PRIORITIZE BOXED TEXT: a number the student boxed/circled is their definitive answer.
+    3. COORDINATES: provide 'box' [ymin, xmin, ymax, xmax] precisely.
+    4. JSON OUTPUT: {"results": [{"studentName": "...", "gradings": [{"questionId": "...", "studentAnswer": "...", "grade": number, "maxGrade": number, "feedback": "...", "box": [ymin, xmin, ymax, xmax], "pageIndex": number}]}]}.`;
 
     const parts: any[] = base64ImagesData.map((data) => ({ inlineData: { data, mimeType: "image/jpeg" } }));
     parts.push({ text: prompt });
@@ -288,8 +270,9 @@ export async function gradeStudentPaper(
       contents: { parts },
       config: { 
         responseMimeType: "application/json",
-        temperature: 0, // صفر للحفاظ على دقة مطابقة تامة
-        systemInstruction: systemInstruction
+        temperature: 0,
+        systemInstruction:
+          "أنت معلم عراقي خبير وروبوت استخراج نصوص حرفي، تصحّح كل المواد. أولاً حدّد نوع كل سؤال: رقمي (رياضيات/مسائل حسابية) أو نصي (تعريف/شرح/قانون/قواعد). 1) الاستخراج: اكتب ما تراه في خط الطالب بدقة 100% حتى لو كان خطأً، واحتفظ بنظام أرقامه (عربي يبقى عربي). إذا رأيت '68-' اكتب '68-' ولا تصححها، ولا تنسخ الإجابة النموذجية أبداً، والسؤال الفارغ تكتبه فارغاً ودرجته صفر. 2) التصحيح: للأسئلة الرقمية ركّز فقط على الناتج النهائي (آخر رقم بعد آخر علامة =)؛ حوّله إلى كلمات (مثل ٢٥ تصبح خمسة وعشرون، و-١٥ تصبح سالب خمسة عشر) واقرأ كل خانة بترتيبها دون قلب، ثم حوّل آخر رقم في الإجابة النموذجية إلى كلمات وقارن: إن تطابقا فالدرجة كاملة وإلا صفر، بلا درجة جزئية في الرياضيات. لا تحلّل الخطوات الوسطى. للأسئلة النصية قارن المعنى والمفاهيم بالنموذج واقبل إعادة الصياغة وامنح درجة جزئية إن غطّى بعض النقاط. اجعل الملاحظات (feedback) بالعربية الفصحى وبأسلوب تربوي."
       }
     });
 
@@ -302,10 +285,29 @@ export async function gradeStudentPaper(
 
     return { 
       results: results.map((r: any) => {
-        const gradingsWithMax = (r.gradings || []).map((g: any) => ({
-          ...g,
-          maxGrade: g.maxGrade || flattenedQuestions.find(fq => fq.id === g.questionId)?.grade || 0
-        }));
+        const gradingsWithMax = (r.gradings || []).map((g: any) => {
+          const maxGrade = g.maxGrade || flattenedQuestions.find((fq: any) => fq.id === g.questionId)?.grade || 0;
+
+          // ── Copy detection via the secret ¥¥ marker ──────────────────────
+          // If ¥¥ appears in the transcription, the AI copied the model answer
+          // instead of reading the student's ink. Flag it, then strip the marker
+          // from every visible field.
+          const stripMarker = (s: any) => String(s ?? '').split(COPY_MARKER).join('').replace(/\u00A5/g, '').trim();
+          const markerCopied = String(g.studentAnswer ?? '').includes(COPY_MARKER);
+          const cleanStudentAnswer = stripMarker(g.studentAnswer);
+
+          let feedback = g.feedback || '';
+          if (markerCopied) {
+            feedback = '\u26A0\uFE0F تحذير: تم اكتشاف نسخ الاجابة النموذجية بدل قراءة خط الطالب، يرجى المراجعة اليدوية. ' + feedback;
+          }
+
+          return {
+            ...g,
+            studentAnswer: cleanStudentAnswer,
+            feedback,
+            maxGrade
+          };
+        });
         
         // Ensure total grade is calculated by summing individual question grades
         const computedTotal = gradingsWithMax.reduce((acc: number, g: any) => acc + (Number(g.grade) || 0), 0);
@@ -359,3 +361,4 @@ function fixInlineSubQuestions(q: any, parentId?: string, level: number = 1): an
   }
   return { ...q, id };
 }
+
