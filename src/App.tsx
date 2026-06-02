@@ -429,13 +429,13 @@ function GradingResultItem({ question, gradings, onGradeChange, level = 1 }: any
       "p-4 md:p-6 rounded-2xl border space-y-3 transition-all",
       level === 1 ? "bg-stone-50 border-stone-100 shadow-sm" : "bg-white border-stone-50 mr-2 md:mr-6"
     )}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col gap-2 flex-1 min-w-0">
-          <div className="flex items-start gap-2 min-w-0">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 flex-1">
+          <div className="flex items-start gap-2">
             <span className="font-bold text-stone-700 whitespace-nowrap">
               {displayLabel}:
             </span>
-            <span className="text-stone-800 break-words min-w-0 flex-1">{cleanQuestionText(question.text, label)}</span>
+            <span className="text-stone-800">{cleanQuestionText(question.text, label)}</span>
           </div>
           {question.questionImage && (
             <img 
@@ -469,25 +469,25 @@ function GradingResultItem({ question, gradings, onGradeChange, level = 1 }: any
       {!hasSub && grading && (
         <div className="mt-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-            <div className="space-y-2 min-w-0">
+            <div className="space-y-2">
               <span className="text-stone-400 font-bold flex items-center gap-1 uppercase tracking-wider text-[10px]">
                 <User className="w-3 h-3" /> إجابة الطالب:
               </span>
               <p 
-                className="p-4 bg-white rounded-2xl border border-stone-100 italic text-stone-700 leading-relaxed shadow-sm break-words overflow-wrap-anywhere whitespace-pre-wrap"
-                style={{ unicodeBidi: 'plaintext', textAlign: 'start', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                className="p-4 bg-white rounded-2xl border border-stone-100 italic text-stone-700 leading-relaxed shadow-sm"
+                style={{ unicodeBidi: 'plaintext', textAlign: 'start' }}
               >
                 "{grading.studentAnswer}"
               </p>
             </div>
-            <div className="space-y-2 min-w-0">
+            <div className="space-y-2">
               <span className="text-stone-400 font-bold flex items-center gap-1 uppercase tracking-wider text-[10px]">
                 <CheckCircle className="w-3 h-3" /> الإجابة النموذجية:
               </span>
               <div className="flex flex-col gap-3">
                 <p 
-                  className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-emerald-900 leading-relaxed shadow-sm break-words whitespace-pre-wrap"
-                  style={{ unicodeBidi: 'plaintext', textAlign: 'start', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                  className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-emerald-900 leading-relaxed shadow-sm"
+                  style={{ unicodeBidi: 'plaintext', textAlign: 'start' }}
                 >
                   "{question.answer || 'غير متوفرة'}"
                 </p>
@@ -508,7 +508,7 @@ function GradingResultItem({ question, gradings, onGradeChange, level = 1 }: any
               <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider flex items-center gap-1">
                 <FileText className="w-3 h-3" /> ملاحظات المصحح:
               </span>
-              <p className="text-stone-600 mt-2 leading-relaxed bg-stone-100/50 p-3 rounded-xl break-words" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{grading.feedback}</p>
+              <p className="text-stone-600 mt-2 leading-relaxed bg-stone-100/50 p-3 rounded-xl">{grading.feedback}</p>
             </div>
           )}
         </div>
@@ -872,7 +872,7 @@ function App() {
                 <span className="text-[10px] font-bold text-stone-600">{userProfile?.pagesUsed} / {userProfile?.pageLimit}</span>
               </div>
             </div>
-              {/* Manual API key button removed — keys now come from Cloudflare environment variables */}
+              {/* Manual API key button removed — keys now come from Cloudflare environment variables with rotation */}
             <div className="flex items-center gap-2 px-1.5 md:px-3 py-1.5 bg-stone-100 rounded-full">
               <img src={user.photoURL || ''} alt="" className="w-6 h-6 rounded-full" />
               <span className="hidden sm:inline text-sm font-medium">{user.displayName}</span>
@@ -3140,7 +3140,7 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="max-w-4xl mx-auto space-y-8 w-full overflow-x-hidden px-1 sm:px-0"
+      className="max-w-4xl mx-auto space-y-8"
     >
       <div className="flex items-center justify-between">
         <div>
@@ -3193,7 +3193,33 @@ function Grader({ user, userProfile, exam, sessions, onComplete, onCancel }: any
           </div>
 
           <div className="flex flex-col items-center gap-2">
-            {/* Subject selector removed — the AI now auto-detects per-question type (numeric vs textual) */}
+            <div className="w-full max-w-sm space-y-2 mb-4 text-right">
+              <label className="text-sm font-bold text-stone-600 block">مادة الامتحان لتخصيص الذكاء الاصطناعي:</label>
+              {user.email?.toLowerCase()?.trim() === 'asmaomar5566@gmail.com' ? (
+                <select 
+                  value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-stone-700"
+                >
+                  <option value="رياضيات">رياضيات (Math)</option>
+                  <option value="أحياء">أحياء (Biology)</option>
+                  <option value="كيمياء">كيمياء (Chemistry)</option>
+                  <option value="فيزياء">فيزياء (Physics)</option>
+                  <option value="قواعد">قواعد اللغة العربية</option>
+                  <option value="إسلامية">تربية إسلامية</option>
+                  <option value="إنجليزي">لغة إنجليزية</option>
+                  <option value="عام">عام / مادة أخرى</option>
+                </select>
+              ) : (
+                <input 
+                  type="text"
+                  value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  placeholder="مثلاً: رياضيات، أحياء..."
+                  className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-right"
+                />
+              )}
+            </div>
 
             <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
               <HelpCircle className="w-3 h-3" />
